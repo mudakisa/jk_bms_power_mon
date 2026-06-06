@@ -36,6 +36,12 @@
   .stat .v small { font-size:15px; color:var(--muted); font-weight:400; }
   .bar { height:6px; border-radius:3px; background:#23262d; margin-top:10px; overflow:hidden; }
   .bar > i { display:block; height:100%; border-radius:3px; }
+  .cells-now { flex:0 0 auto; display:grid; grid-template-columns:repeat(auto-fit, minmax(96px,1fr)); gap:12px; }
+  .cells-now .cell { background:var(--card); border:1px solid var(--line); border-radius:10px;
+                     padding:8px 12px; display:flex; align-items:baseline; justify-content:space-between; min-width:0; }
+  .cells-now .cell .ci { color:var(--muted); font-size:12px; }
+  .cells-now .cell .cv { font-size:18px; font-weight:600; }
+  .cells-now .cell .cv small { font-size:11px; color:var(--muted); font-weight:400; }
   .charts { flex:1 1 auto; min-height:0; display:grid;
             grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(2,1fr); gap:12px; }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px;
@@ -75,6 +81,7 @@
     <div class="stat"><div class="k">Current</div><div class="v" id="s_a">—</div></div>
     <div class="stat"><div class="k">Power</div><div class="v" id="s_w">—</div></div>
   </div>
+  <div class="cells-now" id="cells_now"></div>
   <div class="charts">
     <div class="panel"><h2>Pack voltage</h2><div class="wrap"><canvas id="c_v"></canvas></div></div>
     <div class="panel"><h2>Current (load behaviour)</h2><div class="wrap"><canvas id="c_a"></canvas></div></div>
@@ -166,6 +173,15 @@ async function load(){
     sv.innerHTML = `${L.pack_v.toFixed(2)}<small> V</small>`; sv.style.color = colorV(L.pack_v);
     document.getElementById("s_a").innerHTML = `${L.current_a>=0?"+":""}${L.current_a.toFixed(1)}<small> A</small>`;
     document.getElementById("s_w").innerHTML = `${L.power_w>=0?"+":""}${Math.round(L.power_w)}<small> W</small>`;
+    const cn = document.getElementById("cells_now");
+    if (L.cells && L.cells.length){
+      const mn = Math.min(...L.cells), mx = Math.max(...L.cells), spread = L.cells.length > 1;
+      cn.innerHTML = L.cells.map((v,i) => {
+        const col = spread && v===mn ? C.cmin : (spread && v===mx ? C.cmax : "var(--txt)");
+        return `<div class="cell"><span class="ci">C${i+1}</span>`
+             + `<span class="cv" style="color:${col}">${v.toFixed(3)}<small> V</small></span></div>`;
+      }).join("");
+    }
   } else { age.textContent = "no data"; }
 
   const t = d.t;

@@ -26,7 +26,7 @@ def query(minutes):
     con.execute("PRAGMA busy_timeout=3000")
     cutoff = time.time() - minutes * 60
     rows = con.execute(
-        f"SELECT ts,{','.join(COLS)} FROM readings WHERE bank=? AND ts>=? ORDER BY ts",
+        f"SELECT ts,{','.join(COLS)},cells_json FROM readings WHERE bank=? AND ts>=? ORDER BY ts",
         (BANK, cutoff)).fetchall()
     con.close()
     out = {"t": [int(r[0] * 1000) for r in rows]}
@@ -40,6 +40,10 @@ def query(minutes):
             latest[c] = last[i + 1]
         latest["delta_mv"] = (last[COLS.index("cell_delta_v") + 1] or 0) * 1000
         latest["age_s"] = round(time.time() - last[0], 1)
+        try:                                   # per-cell voltages from cells_json
+            latest["cells"] = json.loads(last[-1]) if last[-1] else []
+        except Exception:
+            latest["cells"] = []
         out["latest"] = latest
     else:
         out["latest"] = None
