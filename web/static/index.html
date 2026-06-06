@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PowerMon - Bank 1</title>
+<script src="/static/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0e0f12; --card:#16181d; --line:#23262d; --txt:#e6e6e6; --muted:#8a8f98; }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--txt); height:100vh; overflow:hidden;
+         display:flex; flex-direction:column;
+         font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+           padding:12px 18px; border-bottom:1px solid var(--line); background:#121419; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  .spacer { flex:1; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#3bbf6b; display:inline-block; }
+  .dot.stale { background:#d9534f; }
+  .age { color:var(--muted); font-size:12px; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .seg button { background:transparent; color:var(--muted); border:0; padding:6px 11px;
+                cursor:pointer; font-size:13px; }
+  .seg button:hover { background:#1d2128; color:var(--txt); }
+  .seg button.on { background:#2a4c7a; color:#fff; }
+  select { background:#1d2128; color:var(--txt); border:1px solid var(--line);
+           border-radius:7px; padding:6px 8px; }
+  label.ctl { color:var(--muted); font-size:12px; display:flex; align-items:center; gap:6px; }
+  main { padding:12px; display:flex; flex-direction:column; gap:12px; flex:1 1 auto; min-height:0; }
+  .stats { flex:0 0 auto; display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+          min-width:0; overflow:hidden; }
+  .stat .k { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .stat .v { font-size:30px; font-weight:600; margin-top:4px; }
+  .stat .v small { font-size:15px; color:var(--muted); font-weight:400; }
+  .bar { height:6px; border-radius:3px; background:#23262d; margin-top:10px; overflow:hidden; }
+  .bar > i { display:block; height:100%; border-radius:3px; }
+  .charts { flex:1 1 auto; min-height:0; display:grid;
+            grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(2,1fr); gap:12px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+           display:flex; flex-direction:column; min-height:0; min-width:0; }
+  .panel h2 { font-size:13px; font-weight:500; margin:0 0 8px; color:var(--muted); flex:0 0 auto; }
+  .panel .wrap { flex:1 1 auto; min-height:0; position:relative; }
+  @media (max-width:1100px){
+    body { height:auto; overflow:auto; }
+    .charts { grid-template-columns:repeat(2,1fr); grid-template-rows:none; }
+    .stats { grid-template-columns:repeat(2,1fr); }
+    .panel .wrap { min-height:280px; }
+  }
+  @media (max-width:680px){ .charts{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>PowerMon <span style="color:var(--muted);font-weight:400">- Bank 1</span></h1>
+  <span class="dot" id="dot"></span><span class="age" id="age">—</span>
+  <span class="spacer"></span>
+  <div class="seg" id="ranges"></div>
+  <label class="ctl">refresh
+    <select id="refresh">
+      <option value="0">Off</option>
+      <option value="10000">10s</option>
+      <option value="30000" selected>30s</option>
+      <option value="60000">1m</option>
+    </select>
+  </label>
+</header>
+
+<main>
+  <div class="stats">
+    <div class="stat"><div class="k">State of charge</div><div class="v" id="s_soc">—</div>
+      <div class="bar"><i id="s_soc_bar"></i></div></div>
+    <div class="stat"><div class="k">Pack voltage</div><div class="v" id="s_v">—</div></div>
+    <div class="stat"><div class="k">Current</div><div class="v" id="s_a">—</div></div>
+    <div class="stat"><div class="k">Power</div><div class="v" id="s_w">—</div></div>
+  </div>
+  <div class="charts">
+    <div class="panel"><h2>Pack voltage</h2><div class="wrap"><canvas id="c_v"></canvas></div></div>
+    <div class="panel"><h2>Current (load behaviour)</h2><div class="wrap"><canvas id="c_a"></canvas></div></div>
+    <div class="panel"><h2>State of charge</h2><div class="wrap"><canvas id="c_soc"></canvas></div></div>
+    <div class="panel"><h2>Temperatures</h2><div class="wrap"><canvas id="c_t"></canvas></div></div>
+    <div class="panel"><h2>Cell voltages (min / avg / max)</h2><div class="wrap"><canvas id="c_cells"></canvas></div></div>
+    <div class="panel"><h2>Cell balance delta (mV)</h2><div class="wrap"><canvas id="c_d"></canvas></div></div>
+  </div>
+</main>
+
+<script>
+const RANGES = [["30m",30],["1h",60],["6h",360],["24h",1440],["7d",10080]];
+const state = { minutes: 360, refreshMs: 30000, timer: null };
+
+// ---- build range selector
+const segEl = document.getElementById("ranges");
+RANGES.forEach(([lbl,min]) => {
+  const b = document.createElement("button");
+  b.textContent = lbl; b.dataset.min = min;
+  if (min === state.minutes) b.classList.add("on");
+  b.onclick = () => { state.minutes = min;
+    [...segEl.children].forEach(x => x.classList.toggle("on", +x.dataset.min === min));
+    load(); };
+  segEl.appendChild(b);
+});
+document.getElementById("refresh").onchange = (e) => {
+  state.refreshMs = +e.target.value; schedule();
+};
+
+// ---- colours
+const C = { v:"#5b9bd5", a:"#e0883c", soc:"#3bbf6b",
+            mos:"#e0883c", t1:"#5b9bd5", t2:"#b06bd9",
+            cmin:"#e0883c", cavg:"#3bbf6b", cmax:"#5b9bd5", d:"#3bbf6b" };
+
+function fmtTime(ms){
+  const d = new Date(ms);
+  const hm = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  return state.minutes > 1440
+    ? d.toLocaleDateString([], {month:"2-digit", day:"2-digit"}) + " " + hm : hm;
+}
+function ds(label, color, fill){
+  return { label, data:[], borderColor:color, backgroundColor:color+"22",
+           borderWidth:2, pointRadius:0, tension:0.15, fill:!!fill };
+}
+function mkChart(id, datasets, ycfg){
+  return new Chart(document.getElementById(id), {
+    type:"line", data:{datasets},
+    options:{ animation:false, responsive:true, maintainAspectRatio:false,
+      interaction:{mode:"index", intersect:false},
+      plugins:{ legend:{display:datasets.length>1, labels:{color:"#9aa0aa", boxWidth:10, font:{size:11}}},
+                tooltip:{callbacks:{title:(it)=>fmtTime(it[0].parsed.x)}} },
+      scales:{ x:{type:"linear", grid:{color:"#1d2026"},
+                  ticks:{color:"#777", maxTicksLimit:6, callback:(v)=>fmtTime(v)}},
+               y:Object.assign({grid:{color:"#1d2026"}, ticks:{color:"#777"}}, ycfg||{}) } }
+  });
+}
+const ch = {
+  v:    mkChart("c_v",    [ds("Pack V", C.v, true)], {}),
+  a:    mkChart("c_a",    [ds("Current", C.a, true)], {}),
+  soc:  mkChart("c_soc",  [ds("SoC", C.soc, true)], {min:0, max:100}),
+  t:    mkChart("c_t",    [ds("MOSFET",C.mos), ds("Sensor 1",C.t1), ds("Sensor 2",C.t2)], {}),
+  cells:mkChart("c_cells",[ds("Cell min",C.cmin), ds("Cell avg",C.cavg), ds("Cell max",C.cmax)], {}),
+  d:    mkChart("c_d",    [ds("Delta mV", C.d, true)], {min:0}),
+};
+
+const pts = (t,arr) => t.map((x,i)=>({x, y:arr[i]}));
+function setData(chart, idx, t, arr){ chart.data.datasets[idx].data = pts(t,arr); }
+
+function colorSoc(s){ return s<20?"#d9534f":s<40?"#e0883c":s<60?"#e6c84f":"#3bbf6b"; }
+function colorV(v){ return v<12?"#d9534f":v<12.8?"#e0883c":"#3bbf6b"; }
+
+async function load(){
+  let d;
+  try { d = await (await fetch(`/api/data?minutes=${state.minutes}`, {cache:"no-store"})).json(); }
+  catch(e){ document.getElementById("age").textContent = "fetch error"; return; }
+
+  const L = d.latest;
+  const dot = document.getElementById("dot"), age = document.getElementById("age");
+  if (L){
+    dot.classList.toggle("stale", L.age_s > 120);
+    age.textContent = L.age_s < 90 ? `updated ${Math.round(L.age_s)}s ago`
+                                   : `stale ${Math.round(L.age_s)}s`;
+    const soc = L.soc_pct;
+    const se = document.getElementById("s_soc");
+    se.innerHTML = `${soc}<small> %</small>`; se.style.color = colorSoc(soc);
+    const bar = document.getElementById("s_soc_bar");
+    bar.style.width = soc + "%"; bar.style.background = colorSoc(soc);
+    const sv = document.getElementById("s_v");
+    sv.innerHTML = `${L.pack_v.toFixed(2)}<small> V</small>`; sv.style.color = colorV(L.pack_v);
+    document.getElementById("s_a").innerHTML = `${L.current_a>=0?"+":""}${L.current_a.toFixed(1)}<small> A</small>`;
+    document.getElementById("s_w").innerHTML = `${L.power_w>=0?"+":""}${Math.round(L.power_w)}<small> W</small>`;
+  } else { age.textContent = "no data"; }
+
+  const t = d.t;
+  setData(ch.v, 0, t, d.pack_v);
+  setData(ch.a, 0, t, d.current_a);
+  setData(ch.soc, 0, t, d.soc_pct);
+  setData(ch.t, 0, t, d.mos_temp_c); setData(ch.t, 1, t, d.temp1_c); setData(ch.t, 2, t, d.temp2_c);
+  setData(ch.cells, 0, t, d.cell_min_v); setData(ch.cells, 1, t, d.cell_avg_v); setData(ch.cells, 2, t, d.cell_max_v);
+  setData(ch.d, 0, t, d.delta_mv);
+  Object.values(ch).forEach(c => c.update("none"));
+}
+
+function schedule(){
+  if (state.timer) clearInterval(state.timer);
+  if (state.refreshMs > 0) state.timer = setInterval(load, state.refreshMs);
+}
+load(); schedule();
+</script>
+</body>
+</html>

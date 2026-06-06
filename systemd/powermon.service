@@ -1,0 +1,16 @@
+[Unit]
+Description=PowerMon - JK-BMS battery telemetry collector
+After=bluetooth.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/powermon
+ExecStart=/path/to/powermon/.venv/bin/python -u /path/to/powermon/collect.py
+# (collect.py handles SIGTERM and disconnects cleanly, so no ExecStopPost needed)
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

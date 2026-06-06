@@ -1,0 +1,15 @@
+[Unit]
+Description=PowerMon web dashboard (stdlib HTTP on :8080, reads SSD DB read-only)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/powermon/web
+ExecStart=/usr/bin/python3 -u /path/to/powermon/web/web.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

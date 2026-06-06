@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local config (copy config.example.py -> config.py and fill it in)
+config.py
+
+# Personal / agent-internal working files (kept local, not for the public repo)
+CLAUDE.md
+TODO.md
+
+# Backups / scratch
+*.bak
+
+# Databases - live battery data lives outside the repo (on an SSD), never committed
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
