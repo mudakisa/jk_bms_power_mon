@@ -16,12 +16,8 @@ serves the dashboard from the same data.
   cycle count, and balance delta.
 - Adaptive logging to SQLite - frequent under load, sparse when idle, and the load
   on/off edge is always captured.
-- Built-in web dashboard with a time-range picker (30m / 1h / 6h / 24h / 7d) and
-  auto-refresh. Zero JavaScript dependencies beyond a single vendored Chart.js.
 - Runs unattended under systemd, reconnects on its own, and disconnects cleanly on stop
   so the phone app can take over the link.
-- One beep at connect (a deliberate "connected" confirmation), then silence - no
-  per-poll beeping, because the BMS streams on its own once asked.
 
 ## Supported hardware
 
