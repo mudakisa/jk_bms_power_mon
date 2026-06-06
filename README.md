@@ -50,7 +50,7 @@ Python standard library.
 ## Install
 
 ```bash
-git clone <your-repo-url> powermon
+git clone https://github.com/mudakisa/jk_bms_power_mon powermon
 cd powermon
 python3 -m venv .venv
 . .venv/bin/activate
