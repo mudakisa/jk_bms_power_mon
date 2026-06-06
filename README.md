@@ -6,9 +6,9 @@ local web dashboard. Pure Python, runs as a background service on Linux. It is
 
 ![PowerMon web dashboard](docs/dashboard.png)
 
-Built for a home LiFePO4 backup bank, but it works with any JK-BMS that speaks the
-JK02_32S BLE protocol. The collector holds one persistent BLE connection and decodes
-the cell-info stream; a tiny stdlib web server serves the dashboard from the same data.
+Works with any JK-BMS that speaks the JK02_32S BLE protocol. The collector holds one
+persistent BLE connection and decodes the cell-info stream; a tiny stdlib web server
+serves the dashboard from the same data.
 
 ## Features
 
