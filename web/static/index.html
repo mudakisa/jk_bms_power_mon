@@ -191,7 +191,14 @@ async function load(){
   setData(ch.t, 0, t, d.mos_temp_c); setData(ch.t, 1, t, d.temp1_c); setData(ch.t, 2, t, d.temp2_c);
   setData(ch.cells, 0, t, d.cell_min_v); setData(ch.cells, 1, t, d.cell_avg_v); setData(ch.cells, 2, t, d.cell_max_v);
   setData(ch.d, 0, t, d.delta_mv);
-  Object.values(ch).forEach(c => c.update("none"));
+  // Pin the X axis to the data extent. Otherwise the linear scale rounds the
+  // ms bounds to "nice" numbers and over-extends, leaving empty margins L/R.
+  const xmin = t.length ? t[0] : undefined, xmax = t.length ? t[t.length - 1] : undefined;
+  Object.values(ch).forEach(c => {
+    c.options.scales.x.min = xmin;
+    c.options.scales.x.max = xmax;
+    c.update("none");
+  });
 }
 
 function schedule(){
