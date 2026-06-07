@@ -8,8 +8,9 @@ config.py is gitignored, so your device addresses and paths stay local.
 """
 
 # SQLite database file. The collector writes here; the dashboards read it.
-# Put it on an SSD: on a spinning HDD the drive head clicks on every commit
-# (audible, and pointless wear). The file is created automatically.
+# An SSD is a good home for it - the frequent small commits stay quiet and cause no
+# mechanical wear. (On some spinning HDDs the head clicks audibly on each commit.)
+# The file is created automatically.
 DB = "powermon.db"
 
 # Battery bank(s) to monitor: a list of (label, BLE MAC address).

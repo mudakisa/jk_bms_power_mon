@@ -81,8 +81,9 @@ DB = "powermon.db"
 BANKS = [("bank1", "AA:BB:CC:DD:EE:FF")]
 ```
 
-Tip: point `DB` at an SSD. On a spinning HDD the drive head clicks on every commit -
-audible and pointless. The write volume is tiny (about 50 MB/day idle).
+Tip: an SSD makes a good home for the DB - the frequent small commits stay quiet and cause
+no mechanical wear. On some spinning HDDs the head clicks audibly on each commit (others are
+fine). Write volume is tiny, about 50 MB/day idle.
 
 ## Run
 
