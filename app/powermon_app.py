@@ -263,7 +263,6 @@ class Main(QMainWindow):
         self.tray = None                        # before anything that fires changeEvent
         self.setWindowTitle("PowerMon")
         self.resize(1154, 774)                  # 1442x968 px at a 1.25 desktop scale
-        self.setMinimumSize(800, 560)
         self.minutes = 360
         self.bank = LABELS[0][0]
         self.paused = False
@@ -276,11 +275,21 @@ class Main(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ---- header: title, freshness, range, refresh
+        # ---- header: title, banks, freshness, signal, link | range, refresh.
+        # The right group shares row 1 while it fits and drops to row 2 when the window
+        # is narrow (see fit_header) - squeezed into one row the buttons got clipped.
         hdr = QFrame()
         hdr.setObjectName("header")
-        h = QHBoxLayout(hdr)
-        h.setContentsMargins(18, 12, 18, 12)
+        hv = QVBoxLayout(hdr)
+        hv.setContentsMargins(18, 12, 18, 12)
+        hv.setSpacing(8)
+        self.row1, self.row2 = QHBoxLayout(), QHBoxLayout()
+        self.row2.addStretch(1)
+        hv.addLayout(self.row1)
+        hv.addLayout(self.row2)
+        self.hleft, self.hright = QWidget(), QWidget()
+        h = QHBoxLayout(self.hleft)
+        h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(16)
         h.addWidget(label('<span style="font-size:16px; font-weight:600">PowerMon</span>'))
         # bank buttons (labels from config.py) and the connect / disconnect of the selected one
@@ -314,7 +323,13 @@ class Main(QMainWindow):
         self.link.setToolTip("Release the BLE link so the phone app can connect, or take it back")
         self.link.clicked.connect(self.toggle_link)
         h.addWidget(self.link)
-        h.addStretch(1)
+        # fixed widths for the texts that change, so the header doesn't jump
+        for w, longest in ((self.age, "paused, link free"), (self.sig, "▂▄▆█ -100 dBm")):
+            w.ensurePolished()
+            w.setMinimumWidth(w.fontMetrics().horizontalAdvance(longest) + 6)
+        h = QHBoxLayout(self.hright)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(16)
         seg = QFrame()
         seg.setObjectName("seg")
         sl = QHBoxLayout(seg)
@@ -337,6 +352,10 @@ class Main(QMainWindow):
         self.refresh.setCurrentIndex(2)
         self.refresh.currentIndexChanged.connect(self.schedule)
         h.addWidget(self.refresh)
+        self.row1.addWidget(self.hleft)
+        self.row1.addStretch(1)
+        self.row1.addWidget(self.hright)
+        self.two_rows = False
         outer.addWidget(hdr)
 
         self.body = QWidget()
@@ -395,6 +414,7 @@ class Main(QMainWindow):
             grid.setColumnStretch(col, 1)
         main.addLayout(grid, 1)
 
+        self.setMinimumHeight(560)
         self.load()
         self.schedule()
 
@@ -454,6 +474,22 @@ class Main(QMainWindow):
         super().changeEvent(e)
         if self.tray and e.type() == QEvent.WindowStateChange and self.isMinimized():
             QTimer.singleShot(0, self.hide)         # minimize = into the tray
+
+    def fit_header(self):
+        """Range + refresh share the header row while it fits, else take a second row.
+        Measured here, not in __init__: sizes are right only once the style applies."""
+        self.setMinimumWidth(max(self.body.minimumSizeHint().width(),   # narrowest: the body,
+                                 self.hleft.sizeHint().width() + 36,    # or one header group
+                                 self.hright.sizeHint().width() + 36))  # per row
+        two = self.width() < self.hleft.sizeHint().width() + self.hright.sizeHint().width() + 16 + 36
+        if two != self.two_rows:
+            self.two_rows = two
+            (self.row1 if two else self.row2).removeWidget(self.hright)
+            (self.row2 if two else self.row1).addWidget(self.hright)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.fit_header()
 
     def eventFilter(self, obj, e):
         if obj is self.body and e.type() == QEvent.Resize:
