@@ -29,6 +29,23 @@ def control_path(db=DB):
     return os.path.splitext(db)[0] + ".paused.json"
 
 
+def status_path(db=DB):
+    """Per-bank link status the collector writes every ~10 s: {"bank": {"link", "rssi", "ts"}}."""
+    return os.path.splitext(db)[0] + ".status.json"
+
+
+def links(db=DB):
+    """{bank: dBm or None} for the banks with a live link (a fresh, < 30 s, status).
+    None = linked but no signal reading (btmgmt lacks its capability)."""
+    try:
+        with open(status_path(db)) as f:
+            st = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {}
+    return {b: s.get("rssi") for b, s in st.items()
+            if s.get("link") and time.time() - s["ts"] < 30}
+
+
 def paused(db=DB):
     try:
         with open(control_path(db)) as f:
@@ -47,8 +64,9 @@ def set_paused(bank, on, db=DB):
 
 
 def banks():
-    off = paused()
-    return [{"id": b, "label": label, "paused": b in off} for b, label in LABELS]
+    off, live = paused(), links()
+    return [{"id": b, "label": label, "paused": b in off, "link": b in live,
+             "rssi": live.get(b)} for b, label in LABELS]
 
 
 def latest_soc(db=DB):

@@ -76,6 +76,7 @@
   <h1>PowerMon</h1>
   <div class="seg" id="banks"></div>
   <span class="dot" id="dot"></span><span class="age" id="age">—</span>
+  <span class="age" id="sig" title="Bluetooth signal of the link to this battery"></span>
   <button class="btn" id="link" title="Release the BLE link so the phone app can connect, or take it back">—</button>
   <span class="spacer"></span>
   <div class="seg" id="ranges"></div>
@@ -197,6 +198,17 @@ function showEta(e){
   sub.textContent = `${e.state === "charge" ? "full" : "empty"} at ${fmtAt(e.at)}, ${a}`;
 }
 
+// BLE signal as four bars (filled up to the level, coloured by it) and dBm
+function signalHtml(link, rssi){
+  if (!link) return "no link";
+  if (rssi === null || rssi === undefined) return "";   // linked, signal not readable here
+  const n = [-90, -80, -70, -60].filter(t => rssi >= t).length;
+  const col = n >= 3 ? "#3bbf6b" : n === 2 ? "#e6c84f" : "#d9534f";
+  const bars = [..."▂▄▆█"].map((c, i) =>
+    `<span style="color:${i < n ? col : "var(--line)"}">${c}</span>`).join("");
+  return `${bars} ${rssi} dBm`;
+}
+
 // bank buttons (labels from config.py) and the connect / disconnect of the selected one
 function showBanks(list, bank){
   const el = document.getElementById("banks");
@@ -216,6 +228,7 @@ function showBanks(list, bank){
   link.textContent = state.me.paused ? "Connect" : "Disconnect";
   link.classList.toggle("accent", state.me.paused);   // Connect stands out when paused
   document.querySelector("main").classList.toggle("paused", state.me.paused);
+  document.getElementById("sig").innerHTML = state.me.paused ? "" : signalHtml(state.me.link, state.me.rssi);
 }
 document.getElementById("link").onclick = async () => {
   if (!state.me) return;

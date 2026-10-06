@@ -8,13 +8,13 @@ Persistent connection wins vs reconnect-per-poll:
 Adaptive storage keeps the DB small: frequent under load, sparse when idle,
 and the load on/off edge is always captured.
 """
-import asyncio, argparse, json, signal, sqlite3, time
+import asyncio, argparse, json, os, re, signal, sqlite3, time
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from jkbms import (parse_cell_info, _cmd, CHAR, RESP_HEADER, FRAME_LEN,
                    CMD_CELL_INFO, CMD_DEVICE_INFO)
-from readings import paused
+from readings import paused, status_path
 
 try:
     from config import DB, BANKS
@@ -68,6 +68,33 @@ def remembered(addr, adapter="hci0"):
     a host-side flag - nothing is sent to the BMS); otherwise it drops it ~30 s
     after a disconnect and the connect fails with "device ... not found"."""
     return BLEDevice(addr, None, {"path": f"/org/bluez/{adapter}/dev_{addr.replace(':', '_')}"})
+
+
+async def link_rssi(addr):
+    """RSSI (dBm) of the live LE link, or None. Read by btmgmt from our own adapter -
+    nothing goes to the BMS. Needs `sudo setcap cap_net_admin+ep /usr/bin/btmgmt`;
+    btmgmt prints only to a terminal, so `script` gives it one."""
+    try:
+        p = await asyncio.create_subprocess_exec(
+            "script", "-qc", f"btmgmt --index 0 conn-info -t 1 {addr}", "/dev/null",
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(p.communicate(), 5)
+    except Exception:
+        return None
+    m = re.search(rb"RSSI (-?\d+)", out)
+    return int(m.group(1)) if m else None
+
+
+STATUS = {}                             # bank -> {"link": bool, "rssi": dBm or None, "ts": time}
+
+
+def put_status(db, name, link, rssi=None):
+    STATUS[name] = {"link": link, "rssi": rssi, "ts": time.time()}
+    tmp = status_path(db) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(STATUS, f)
+    os.replace(tmp, status_path(db))
 
 
 async def _sleep_or_stop(stop, timeout):
@@ -160,9 +187,12 @@ async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
                 # Watchdog. A live JK streams ~1 Hz, so silence means a stuck stream or
                 # a dead link (on a weak signal a link can stay "connected" with nothing
                 # coming through). Ask once more at 20 s (a beep), reconnect at 40 s.
-                dropped, asked = True, False
+                dropped, asked, rssi_at = True, False, 0.0
                 while client.is_connected and not stop.is_set():
                     await _sleep_or_stop(stop, 1)
+                    if time.time() - rssi_at >= 10:     # signal level for the dashboards
+                        put_status(db, name, True, await link_rssi(addr))
+                        rssi_at = time.time()
                     if name in paused(db) or stop.is_set():
                         dropped = False
                         break
@@ -181,6 +211,7 @@ async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
                         break
             finally:
                 await client.disconnect()
+                put_status(db, name, False)
             if not stop.is_set():
                 if dropped:
                     print(f"{name}: link lost - reconnecting")

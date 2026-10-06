@@ -61,6 +61,19 @@ def unit(u): return f'<span style="font-size:15px; color:{MUTED}; font-weight:40
 def signed(x, nd): return f"{'+' if x >= 0 else ''}{x:.{nd}f}"
 
 
+def signal_html(link, rssi):
+    """BLE signal as four bars (filled up to the level, coloured by it) and dBm."""
+    if not link:
+        return f'<span style="color:{MUTED}">no link</span>'
+    if rssi is None:                    # linked, but the signal can't be read here
+        return ""
+    n = sum(rssi >= t for t in (-90, -80, -70, -60))
+    col = "#3bbf6b" if n >= 3 else "#e6c84f" if n == 2 else "#d9534f"
+    bars = "".join(f'<span style="color:{col if i < n else LINE}">{c}</span>'
+                   for i, c in enumerate("▂▄▆█"))
+    return f'{bars}<span style="color:{MUTED}"> {rssi} dBm</span>'
+
+
 def fmt_dur(h):
     m = round(h * 60)
     if m < 60:
@@ -290,8 +303,11 @@ class Main(QMainWindow):
         self.dot = QLabel()
         self.dot.setFixedSize(9, 9)
         self.age = label("—", "muted")
+        self.sig = label("", "muted")
+        self.sig.setToolTip("Bluetooth signal of the link to this battery")
         h.addWidget(self.dot)
         h.addWidget(self.age)
+        h.addWidget(self.sig)
         self.link = QPushButton("—")
         self.link.setObjectName("btn")
         self.link.setCursor(Qt.PointingHandCursor)
@@ -516,7 +532,9 @@ class Main(QMainWindow):
         self.eta_sub.setText(f"{'full' if e['state'] == 'charge' else 'empty'} at {fmt_at(e['at'])}, {a}")
 
     def load(self):
-        self.paused = next(b["paused"] for b in banks() if b["id"] == self.bank)
+        me = next(b for b in banks() if b["id"] == self.bank)
+        self.paused = me["paused"]
+        self.sig.setText("" if self.paused else signal_html(me["link"], me["rssi"]))
         self.link.setText("Connect" if self.paused else "Disconnect")
         self.show_paused(self.paused)
         try:

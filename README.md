@@ -190,6 +190,17 @@ What collides is the adapter's single discovery session, so the collector finds 
 connects banks one at a time, and reconnects to a bank BlueZ still remembers without
 scanning at all. Tested with two banks on one USB adapter, one of them at -83 dBm.
 
+Both dashboards show each link's Bluetooth signal (bars and dBm) next to the update time.
+Linux reads the signal of a live link only with extra rights, so grant them once:
+
+```bash
+sudo setcap cap_net_admin+ep /usr/bin/btmgmt     # undo: sudo setcap -r /usr/bin/btmgmt
+```
+
+The collector then asks the local adapter every 10 s (`btmgmt conn-info` - nothing is sent
+to the BMS) and writes `<db name>.status.json`. Without it the dashboards still show
+"no link" when a bank is down, just no bars.
+
 Pausing a bank from a dashboard writes its id to `<db name>.paused.json` next to the DB;
 the collector checks it every second, drops that link, and reconnects once it is removed.
 
