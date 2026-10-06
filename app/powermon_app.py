@@ -10,7 +10,7 @@ import os, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))      # readings.py / config.py in the project root
-from readings import query
+from readings import query, banks, set_paused, LABELS
 
 import numpy as np
 import pyqtgraph as pg
@@ -41,6 +41,8 @@ QLabel {{ color:{TXT}; font-size:14px; }}
 #seg QPushButton {{ background:transparent; color:{MUTED}; border:0; padding:6px 11px; font-size:13px; }}
 #seg QPushButton:hover {{ background:#1d2128; color:{TXT}; }}
 #seg QPushButton:checked {{ background:#2a4c7a; color:#fff; }}
+#btn {{ background:#1d2128; color:{TXT}; border:1px solid {LINE}; border-radius:7px; padding:6px 11px; font-size:13px; }}
+#btn:hover {{ background:#252a33; }}
 QComboBox {{ background:#1d2128; color:{TXT}; border:1px solid {LINE}; border-radius:7px; padding:4px 8px; }}
 QComboBox::drop-down {{ border:0; width:18px; }}
 QComboBox::down-arrow {{ image:url({os.path.join(HERE, "arrow.svg")}); width:9px; height:6px; }}
@@ -195,10 +197,12 @@ class Chart:
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PowerMon - Bank 1")
+        self.setWindowTitle("PowerMon")
         self.resize(1500, 950)
         self.setMinimumSize(1100, 720)
         self.minutes = 360
+        self.bank = LABELS[0][0]
+        self.paused = False
         self.timer = QTimer(self, timeout=self.load)
 
         root = QWidget()
@@ -214,13 +218,35 @@ class Main(QMainWindow):
         h = QHBoxLayout(hdr)
         h.setContentsMargins(18, 12, 18, 12)
         h.setSpacing(16)
-        h.addWidget(label(f'<span style="font-size:16px; font-weight:600">PowerMon</span>'
-                          f'<span style="font-size:16px; color:{MUTED}"> - Bank 1</span>'))
+        h.addWidget(label('<span style="font-size:16px; font-weight:600">PowerMon</span>'))
+        # bank buttons (labels from config.py) and the connect / disconnect of the selected one
+        bseg = QFrame()
+        bseg.setObjectName("seg")
+        bl = QHBoxLayout(bseg)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(0)
+        self.bank_group = QButtonGroup(self)
+        self.bank_ids = [b for b, _ in LABELS]
+        for i, (b, text) in enumerate(LABELS):
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setChecked(b == self.bank)
+            btn.setCursor(Qt.PointingHandCursor)
+            self.bank_group.addButton(btn, i)
+            bl.addWidget(btn)
+        self.bank_group.idClicked.connect(self.set_bank)
+        h.addWidget(bseg)
         self.dot = QLabel()
         self.dot.setFixedSize(9, 9)
         self.age = label("—", "muted")
         h.addWidget(self.dot)
         h.addWidget(self.age)
+        self.link = QPushButton("—")
+        self.link.setObjectName("btn")
+        self.link.setCursor(Qt.PointingHandCursor)
+        self.link.setToolTip("Release the BLE link so the phone app can connect, or take it back")
+        self.link.clicked.connect(self.toggle_link)
+        h.addWidget(self.link)
         h.addStretch(1)
         seg = QFrame()
         seg.setObjectName("seg")
@@ -294,6 +320,14 @@ class Main(QMainWindow):
         self.load()
         self.schedule()
 
+    def set_bank(self, i):
+        self.bank = self.bank_ids[i]
+        self.load()
+
+    def toggle_link(self):
+        set_paused(self.bank, not self.paused)
+        self.load()
+
     def set_range(self, minutes):
         self.minutes = minutes
         self.load()
@@ -304,13 +338,13 @@ class Main(QMainWindow):
         if ms:
             self.timer.start(ms)
 
-    def set_dot(self, stale):
-        self.dot.setStyleSheet(f"background:{'#d9534f' if stale else '#3bbf6b'}; border-radius:4px;")
+    def set_dot(self, color):
+        self.dot.setStyleSheet(f"background:{color}; border-radius:4px;")
 
     def show_cells(self, cells):
         if len(self.cells) != len(cells):
             while self.cells_row.count():
-                self.cells_row.takeAt(0).widget().deleteLater()
+                self.cells_row.takeAt(0).widget().setParent(None)   # off screen right away
             self.cells = []
             for i in range(len(cells)):
                 f = QFrame()
@@ -323,6 +357,8 @@ class Main(QMainWindow):
                 lay.addWidget(v)
                 self.cells_row.addWidget(f, 1)
                 self.cells.append(v)
+        if not cells:
+            return
         mn, mx, spread = min(cells), max(cells), len(cells) > 1
         for v, x in zip(self.cells, cells):
             col = C["cmin"] if spread and x == mn else C["cmax"] if spread and x == mx else TXT
@@ -349,16 +385,19 @@ class Main(QMainWindow):
         self.eta_sub.setText(f"{'full' if e['state'] == 'charge' else 'empty'} at {fmt_at(e['at'])}, {a}")
 
     def load(self):
+        self.paused = next(b["paused"] for b in banks() if b["id"] == self.bank)
+        self.link.setText("Connect" if self.paused else "Disconnect")
         try:
-            d = query(self.minutes)
+            d = query(self.minutes, self.bank)
         except Exception as e:
-            self.set_dot(True)
+            self.set_dot("#d9534f")
             self.age.setText(f"read error: {e}")
             return
         L = d["latest"]
         if L:
-            self.set_dot(L["age_s"] > 120)
-            self.age.setText(f"updated {round(L['age_s'])}s ago" if L["age_s"] < 90
+            self.set_dot("#6b7079" if self.paused else "#d9534f" if L["age_s"] > 120 else "#3bbf6b")
+            self.age.setText("paused, link free" if self.paused
+                             else f"updated {round(L['age_s'])}s ago" if L["age_s"] < 90
                              else f"stale {round(L['age_s'])}s")
             soc = L["soc_pct"]
             self.s_soc.set(f"{soc}{unit('%')}", color_soc(soc))
@@ -370,9 +409,14 @@ class Main(QMainWindow):
             self.show_eta(L.get("eta"))
             if L["cells"]:
                 self.show_cells(L["cells"])
-        else:
-            self.set_dot(True)
-            self.age.setText("no data")
+        else:                           # no readings for this bank: don't show the last bank's
+            self.set_dot("#6b7079" if self.paused else "#d9534f")
+            self.age.setText("paused, link free" if self.paused else "no data")
+            for s in (self.s_soc, self.s_v, self.s_a, self.s_w):
+                s.set("—")
+            self.soc_bar.setValue(0)
+            self.show_eta(None)
+            self.show_cells([])
 
         t = np.array(d["t"], dtype=float) / 1000
         arr = lambda k: np.array(d[k], dtype=float)

@@ -13,7 +13,8 @@ config.py is gitignored, so your device addresses and paths stay local.
 # The file is created automatically.
 DB = "powermon.db"
 
-# Battery bank(s) to monitor: a list of (label, BLE MAC address).
+# Battery bank(s) to monitor: a list of (id, BLE MAC address[, name]).
+# The optional name is what the dashboards show on the bank's button.
 #
 # How to find your BMS address:
 #   1. Close the JK BMS phone app - the BMS allows only ONE BLE client at a time.
@@ -21,10 +22,9 @@ DB = "powermon.db"
 #   3. Copy the address shown next to your BMS (the name you set in the app)
 #      and paste it below, replacing the placeholder.
 #
-# A single Bluetooth adapter cannot reliably hold two BMS connections at once
-# (their discovery sessions collide). For a second bank use a second adapter or
-# an ESP32 bridge, then uncomment the second line.
+# One Bluetooth adapter holds several banks: the collector finds and connects
+# them one at a time. Uncomment the second line for a second bank.
 BANKS = [
-    ("bank1", "AA:BB:CC:DD:EE:FF"),
-    # ("bank2", "11:22:33:44:55:66"),
+    ("bank1", "AA:BB:CC:DD:EE:FF", "House"),
+    # ("bank2", "11:22:33:44:55:66", "Garage"),
 ]

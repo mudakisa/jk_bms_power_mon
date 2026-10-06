@@ -14,6 +14,8 @@ serves the dashboard from the same data, and the desktop app reads it directly.
 
 - Per-cell voltages, pack voltage, current, power, state of charge, temperatures,
   cycle count, and balance delta.
+- Several banks on one Bluetooth adapter. Switch between them in the dashboard header;
+  Disconnect frees one bank's link for the phone app, Connect takes it back.
 - Time left at the current load: to empty while discharging, to full while charging.
   The load is the mean current over the last 5 minutes; the charge left comes from the
   BMS's own counter.
@@ -90,6 +92,9 @@ DB = "powermon.db"
 BANKS = [("bank1", "AA:BB:CC:DD:EE:FF")]
 ```
 
+An optional third field is the name shown on the bank's button in the dashboards:
+`("bank1", "AA:BB:CC:DD:EE:FF", "House")`. Without it the button shows `bank1`.
+
 Tip: an SSD makes a good home for the DB - the frequent small commits stay quiet and cause
 no mechanical wear. On some spinning HDDs the head clicks audibly on each commit (others are
 fine). Write volume is tiny, about 50 MB/day idle.
@@ -119,7 +124,8 @@ loginctl enable-linger "$USER"   # start at boot without an active login session
 ```
 
 `start.sh` and `stop.sh` resume and pause the collector - handy when you want to connect
-with the phone app, since the BMS only talks to one client at a time. `dashboard.sh`
+with the phone app, since the BMS only talks to one client at a time. To free just one
+bank, use Disconnect in the dashboard header instead; the collector keeps the others. `dashboard.sh`
 opens the web dashboard.
 
 ## Desktop app (Linux, optional)
@@ -174,9 +180,13 @@ this was worked out with - kept in the repo, handy if you port to another model.
 
 ## A second bank
 
-A single Bluetooth adapter cannot reliably hold two BMS connections at once - their
-discovery sessions collide. For two banks, use a second adapter or an ESP32 BLE bridge,
-then add the second entry to `BANKS` in `config.py`.
+Add it to `BANKS` in `config.py` and restart the collector. One adapter holds both links.
+What collides is the adapter's single discovery session, so the collector finds and
+connects banks one at a time, and reconnects to a bank BlueZ still remembers without
+scanning at all. Tested with two banks on one USB adapter, one of them at -83 dBm.
+
+Pausing a bank from a dashboard writes its id to `<db name>.paused.json` next to the DB;
+the collector checks it every second, drops that link, and reconnects once it is removed.
 
 ## Project layout
 

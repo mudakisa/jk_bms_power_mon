@@ -8,7 +8,7 @@ import http.server, socketserver, json, os, sys, urllib.parse
 
 # readings.py and config.py live in the project root (one level up from web/)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from readings import query
+from readings import query, banks, set_paused, LABELS
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 PORT = 8080
@@ -42,11 +42,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(u.query)
             try:
                 minutes = max(1, min(int(q.get("minutes", ["360"])[0]), 525600))
-                self._send(200, json.dumps(query(minutes)).encode(), "application/json")
+                bank = self._bank(q)
+                out = query(minutes, bank)
+                out["bank"], out["banks"] = bank, banks()
+                self._send(200, json.dumps(out).encode(), "application/json")
             except Exception as e:
                 self._send(500, json.dumps({"error": str(e)}).encode(), "application/json")
             return
         self._send(404, b"not found", "text/plain")
+
+    def _bank(self, q):
+        ids = [b for b, _ in LABELS]
+        bank = q.get("bank", [""])[0]
+        return bank if bank in ids else ids[0]
+
+    def do_POST(self):
+        """POST /api/pause?bank=<id>&on=1|0 - release / take back a bank's BLE link."""
+        u = urllib.parse.urlparse(self.path)
+        if u.path != "/api/pause":
+            return self._send(404, b"not found", "text/plain")
+        q = urllib.parse.parse_qs(u.query)
+        set_paused(self._bank(q), q.get("on", ["1"])[0] == "1")
+        self._send(200, json.dumps(banks()).encode(), "application/json")
 
     def log_message(self, *a):
         pass

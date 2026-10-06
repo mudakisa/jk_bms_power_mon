@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PowerMon - Bank 1</title>
+<title>PowerMon</title>
 <script src="/static/chart.umd.min.js"></script>
 <style>
   :root { --bg:#0e0f12; --card:#16181d; --line:#23262d; --txt:#e6e6e6; --muted:#8a8f98; }
@@ -18,6 +18,10 @@
   .spacer { flex:1; }
   .dot { width:9px; height:9px; border-radius:50%; background:#3bbf6b; display:inline-block; }
   .dot.stale { background:#d9534f; }
+  .dot.paused { background:#6b7079; }
+  .btn { background:#1d2128; color:var(--txt); border:1px solid var(--line); border-radius:7px;
+         padding:6px 11px; cursor:pointer; font-size:13px; }
+  .btn:hover { background:#252a33; }
   .age { color:var(--muted); font-size:12px; }
   .seg { display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
   .seg button { background:transparent; color:var(--muted); border:0; padding:6px 11px;
@@ -60,8 +64,10 @@
 </head>
 <body>
 <header>
-  <h1>PowerMon <span style="color:var(--muted);font-weight:400">- Bank 1</span></h1>
+  <h1>PowerMon</h1>
+  <div class="seg" id="banks"></div>
   <span class="dot" id="dot"></span><span class="age" id="age">—</span>
+  <button class="btn" id="link" title="Release the BLE link so the phone app can connect, or take it back">—</button>
   <span class="spacer"></span>
   <div class="seg" id="ranges"></div>
   <label class="ctl">refresh
@@ -97,7 +103,7 @@
 
 <script>
 const RANGES = [["30m",30],["1h",60],["6h",360],["24h",1440],["7d",10080]];
-const state = { minutes: 360, refreshMs: 30000, timer: null };
+const state = { minutes: 360, refreshMs: 30000, timer: null, bank: "", me: null };
 
 // ---- build range selector
 const segEl = document.getElementById("ranges");
@@ -181,19 +187,47 @@ function showEta(e){
   sub.textContent = `${e.state === "charge" ? "full" : "empty"} at ${fmtAt(e.at)}, ${a}`;
 }
 
+// bank buttons (labels from config.py) and the connect / disconnect of the selected one
+function showBanks(list, bank){
+  const el = document.getElementById("banks");
+  if (el.dataset.ids !== list.map(b => b.id).join()){
+    el.innerHTML = "";
+    list.forEach(b => {
+      const btn = document.createElement("button");
+      btn.textContent = b.label; btn.dataset.id = b.id;
+      btn.onclick = () => { state.bank = b.id; load(); };
+      el.appendChild(btn);
+    });
+    el.dataset.ids = list.map(b => b.id).join();
+  }
+  [...el.children].forEach(x => x.classList.toggle("on", x.dataset.id === bank));
+  state.me = list.find(b => b.id === bank);
+  document.getElementById("link").textContent = state.me.paused ? "Connect" : "Disconnect";
+}
+document.getElementById("link").onclick = async () => {
+  if (!state.me) return;
+  await fetch(`/api/pause?bank=${state.me.id}&on=${state.me.paused ? 0 : 1}`, {method:"POST"});
+  load();
+};
+
 function colorSoc(s){ return s<20?"#d9534f":s<40?"#e0883c":s<60?"#e6c84f":"#3bbf6b"; }
 function colorV(v){ return v<12?"#d9534f":v<12.8?"#e0883c":"#3bbf6b"; }
 
 async function load(){
   let d;
-  try { d = await (await fetch(`/api/data?minutes=${state.minutes}`, {cache:"no-store"})).json(); }
+  try { d = await (await fetch(`/api/data?minutes=${state.minutes}&bank=${state.bank}`,
+                               {cache:"no-store"})).json(); }
   catch(e){ document.getElementById("age").textContent = "fetch error"; return; }
+  state.bank = d.bank;
+  showBanks(d.banks, d.bank);
 
   const L = d.latest;
   const dot = document.getElementById("dot"), age = document.getElementById("age");
+  dot.classList.toggle("paused", state.me.paused);
   if (L){
-    dot.classList.toggle("stale", L.age_s > 120);
-    age.textContent = L.age_s < 90 ? `updated ${Math.round(L.age_s)}s ago`
+    dot.classList.toggle("stale", !state.me.paused && L.age_s > 120);
+    age.textContent = state.me.paused ? "paused, link free"
+                    : L.age_s < 90 ? `updated ${Math.round(L.age_s)}s ago`
                                    : `stale ${Math.round(L.age_s)}s`;
     const soc = L.soc_pct;
     const se = document.getElementById("s_soc");
@@ -214,7 +248,14 @@ async function load(){
              + `<span class="cv" style="color:${col}">${v.toFixed(3)}<small> V</small></span></div>`;
       }).join("");
     }
-  } else { age.textContent = "no data"; }
+  } else {                     // no readings for this bank: don't show the last bank's
+    age.textContent = state.me.paused ? "paused, link free" : "no data";
+    ["s_soc", "s_v", "s_a", "s_w"].forEach(id => {
+      const el = document.getElementById(id); el.textContent = "—"; el.style.color = ""; });
+    document.getElementById("s_soc_bar").style.width = "0";
+    document.getElementById("cells_now").innerHTML = "";
+    showEta(null);
+  }
 
   const t = d.t;
   setData(ch.v, 0, t, d.pack_v);

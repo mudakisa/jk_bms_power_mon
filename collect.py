@@ -10,8 +10,11 @@ and the load on/off edge is always captured.
 """
 import asyncio, argparse, json, signal, sqlite3, time
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError
 from jkbms import (parse_cell_info, _cmd, CHAR, RESP_HEADER, FRAME_LEN,
                    CMD_CELL_INFO, CMD_DEVICE_INFO)
+from readings import paused
 
 try:
     from config import DB, BANKS
@@ -34,8 +37,8 @@ CREATE TABLE IF NOT EXISTS readings (
 CREATE INDEX IF NOT EXISTS idx_readings_bank_ts ON readings(bank, ts);
 """
 
-def init_db():
-    con = sqlite3.connect(DB, check_same_thread=False)
+def init_db(db):
+    con = sqlite3.connect(db, check_same_thread=False)
     con.executescript(SCHEMA)
     con.commit()
     return con
@@ -54,6 +57,19 @@ def store(con, bank, d):
     )
     con.commit()
 
+# The adapter has ONE discovery session: two banks scanning or connecting at once
+# collide. So finding + connecting takes turns; holding the links side by side is fine.
+SCAN_LOCK = asyncio.Lock()
+
+
+def remembered(addr, adapter="hci0"):
+    """The BMS as BlueZ's own device object - connecting to it needs no scan.
+    BlueZ keeps the object only for a trusted device (`bluetoothctl trust <MAC>`,
+    a host-side flag - nothing is sent to the BMS); otherwise it drops it ~30 s
+    after a disconnect and the connect fails with "device ... not found"."""
+    return BLEDevice(addr, None, {"path": f"/org/bluez/{adapter}/dev_{addr.replace(':', '_')}"})
+
+
 async def _sleep_or_stop(stop, timeout):
     """Sleep up to `timeout` seconds, returning early if `stop` is set."""
     try:
@@ -61,7 +77,7 @@ async def _sleep_or_stop(stop, timeout):
     except asyncio.TimeoutError:
         pass
 
-async def run_bank(con, name, addr, cfg, stop, start_delay=0.0):
+async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
     """Hold a persistent connection; store frames adaptively. Reconnect on drop.
     Exits cleanly (disconnecting) when `stop` is set - never via task cancellation,
     which would interrupt the disconnect inside `async with`."""
@@ -99,20 +115,37 @@ async def run_bank(con, name, addr, cfg, stop, start_delay=0.0):
                 try: maybe_store(parse_cell_info(frame))
                 except Exception: pass
 
+    known = True                        # try BlueZ's remembered device first
+    was_paused = False
     while not stop.is_set():
+        # Paused from the dashboard: keep the link free (e.g. for the phone app).
+        if name in paused(db):
+            if not was_paused:
+                print(f"{name}: paused - BLE link is free")
+                was_paused = True
+            await _sleep_or_stop(stop, 1)
+            continue
+        was_paused = False
         try:
-            # Active scan first: connect-by-address relies on BlueZ's cache, which
-            # is unreliable after connect/disconnect churn (DeviceNotFound). Scanning
-            # finds the device directly. Passive - scanning does NOT make the BMS beep.
-            device = await BleakScanner.find_device_by_address(addr, timeout=15.0)
+            async with SCAN_LOCK:
+                if known:
+                    device = remembered(addr)
+                else:
+                    # BlueZ does not know the device: find it by a scan.
+                    # Scanning does NOT make the BMS beep.
+                    device = await BleakScanner.find_device_by_address(addr, timeout=15.0)
+                if device is not None:
+                    client = BleakClient(device, timeout=20.0)
+                    await client.connect()
             if device is None:
                 print(f"{name}: not found in scan; retry in 5s")
                 await _sleep_or_stop(stop, 5)
                 continue
-            # `async with` runs a clean disconnect on exit. We leave the inner loop
-            # only via `stop` (a normal break), never by cancellation, so the
-            # disconnect always completes - no stale "Connected: yes" link.
-            async with BleakClient(device, timeout=20.0) as client:
+            known = True
+            # We leave the inner loop only via `stop` or a pause (a normal break),
+            # never by cancellation, so the disconnect in `finally` always completes -
+            # no stale "Connected: yes" link.
+            try:
                 print(f"{name}: connected ({addr})")
                 st["last_frame"] = time.time()
                 await client.start_notify(CHAR, handle)
@@ -125,12 +158,22 @@ async def run_bank(con, name, addr, cfg, stop, start_delay=0.0):
                 await asyncio.sleep(0.3)
                 await client.write_gatt_char(CHAR, _cmd(CMD_CELL_INFO), response=False)
                 while client.is_connected and not stop.is_set():
-                    await _sleep_or_stop(stop, 5)
+                    await _sleep_or_stop(stop, 1)
+                    if name in paused(db):
+                        break
                     # watchdog: re-request ONLY if the stream truly stalls (rare beep)
                     if not stop.is_set() and time.time() - st["last_frame"] > 60:
                         print(f"{name}: stream stalled >60s - re-requesting")
                         await client.write_gatt_char(CHAR, _cmd(CMD_CELL_INFO), response=False)
                         st["last_frame"] = time.time()
+            finally:
+                await client.disconnect()
+            if not stop.is_set():
+                continue                # paused: the top of the loop reports it
+        except BleakError as e:
+            if "not found" in str(e):   # BlueZ forgot it: scan on the next try
+                known = False
+            print(f"{name}: disconnected ({e!r}); retry in 5s")
         except Exception as e:
             print(f"{name}: disconnected ({e!r}); retry in 5s")
         await _sleep_or_stop(stop, 5)
@@ -140,20 +183,23 @@ async def main():
     ap.add_argument("--load-a", type=float, default=0.5, help="|current| >= this is 'under load' (A)")
     ap.add_argument("--min-load-s", type=float, default=1.0, help="min seconds between stores under load")
     ap.add_argument("--idle-s", type=float, default=30.0, help="seconds between stores when idle")
+    ap.add_argument("--bank", action="append", help="run only this bank (repeatable); default: all")
+    ap.add_argument("--db", default=DB, help="SQLite file (default: DB from config.py)")
     args = ap.parse_args()
     cfg = {"load_a": args.load_a, "min_load_s": args.min_load_s, "idle_s": args.idle_s}
-    con = init_db()
+    con = init_db(args.db)
+    banks = [b for b in BANKS if not args.bank or b[0] in args.bank]
 
     # Graceful shutdown: on SIGTERM/SIGINT we SET an event; the bank tasks see it,
-    # break out of their loops, and let `async with BleakClient` disconnect cleanly.
+    # break out of their loops, and let their `finally` disconnect cleanly.
     # We do NOT cancel the tasks - cancellation interrupts that disconnect and leaves
     # a stale BLE link for the next start / the phone app to trip over.
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for s in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(s, stop.set)
-    tasks = [asyncio.create_task(run_bank(con, n, a, cfg, stop, i * 2.0))
-             for i, (n, a) in enumerate(BANKS)]
+    tasks = [asyncio.create_task(run_bank(con, args.db, n, a, cfg, stop, i * 2.0))
+             for i, (n, a, *_) in enumerate(banks)]
     await asyncio.gather(*tasks)   # each task returns on its own once `stop` is set
 
 asyncio.run(main())
