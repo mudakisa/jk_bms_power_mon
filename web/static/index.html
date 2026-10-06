@@ -22,6 +22,15 @@
   .btn { background:#1d2128; color:var(--txt); border:1px solid var(--line); border-radius:7px;
          padding:6px 11px; cursor:pointer; font-size:13px; }
   .btn:hover { background:#252a33; }
+  .btn.accent { background:#2a4c7a; border-color:#2a4c7a; color:#fff; }
+  /* a disconnected bank: everything below the header dimmed, a note on top */
+  main { position:relative; }
+  main.paused > :not(.veil) { opacity:.3; }
+  .veil { display:none; position:absolute; inset:0; z-index:1; pointer-events:none;
+          align-items:center; justify-content:center; flex-direction:column; gap:4px;
+          font-size:22px; font-weight:600; }
+  .veil small { font-size:13px; font-weight:400; color:var(--muted); }
+  main.paused > .veil { display:flex; }
   .age { color:var(--muted); font-size:12px; }
   .seg { display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
   .seg button { background:transparent; color:var(--muted); border:0; padding:6px 11px;
@@ -81,6 +90,7 @@
 </header>
 
 <main>
+  <div class="veil">Disconnected<small>BLE link is free for the phone app</small></div>
   <div class="stats">
     <div class="stat"><div class="k">State of charge</div><div class="v" id="s_soc">—</div>
       <div class="bar"><i id="s_soc_bar"></i></div></div>
@@ -202,7 +212,10 @@ function showBanks(list, bank){
   }
   [...el.children].forEach(x => x.classList.toggle("on", x.dataset.id === bank));
   state.me = list.find(b => b.id === bank);
-  document.getElementById("link").textContent = state.me.paused ? "Connect" : "Disconnect";
+  const link = document.getElementById("link");
+  link.textContent = state.me.paused ? "Connect" : "Disconnect";
+  link.classList.toggle("accent", state.me.paused);   // Connect stands out when paused
+  document.querySelector("main").classList.toggle("paused", state.me.paused);
 }
 document.getElementById("link").onclick = async () => {
   if (!state.me) return;

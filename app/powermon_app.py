@@ -44,6 +44,8 @@ QLabel {{ color:{TXT}; font-size:14px; }}
 #seg QPushButton:checked {{ background:#2a4c7a; color:#fff; }}
 #btn {{ background:#1d2128; color:{TXT}; border:1px solid {LINE}; border-radius:7px; padding:6px 11px; font-size:13px; }}
 #btn:hover {{ background:#252a33; }}
+#btn[accent="true"] {{ background:#2a4c7a; border-color:#2a4c7a; color:#fff; }}
+#veil {{ background:rgba(14, 15, 18, 170); color:{TXT}; font-size:22px; font-weight:600; }}
 QComboBox {{ background:#1d2128; color:{TXT}; border:1px solid {LINE}; border-radius:7px; padding:4px 8px; }}
 QComboBox::drop-down {{ border:0; width:18px; }}
 QComboBox::down-arrow {{ image:url({os.path.join(HERE, "arrow.svg")}); width:9px; height:6px; }}
@@ -321,10 +323,19 @@ class Main(QMainWindow):
         h.addWidget(self.refresh)
         outer.addWidget(hdr)
 
-        main = QVBoxLayout()
+        self.body = QWidget()
+        main = QVBoxLayout(self.body)
         main.setContentsMargins(12, 12, 12, 12)
         main.setSpacing(12)
-        outer.addLayout(main, 1)
+        outer.addWidget(self.body, 1)
+        # a disconnected bank: everything below the header under a dimming veil
+        self.veil = label("Disconnected<br><span style=\"font-size:13px; font-weight:400; "
+                          f"color:{MUTED}\">BLE link is free for the phone app</span>", "veil")
+        self.veil.setParent(self.body)
+        self.veil.setAlignment(Qt.AlignCenter)
+        self.veil.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.veil.hide()
+        self.body.installEventFilter(self)
 
         # ---- stat cards
         stats = QHBoxLayout()
@@ -428,6 +439,18 @@ class Main(QMainWindow):
         if self.tray and e.type() == QEvent.WindowStateChange and self.isMinimized():
             QTimer.singleShot(0, self.hide)         # minimize = into the tray
 
+    def eventFilter(self, obj, e):
+        if obj is self.body and e.type() == QEvent.Resize:
+            self.veil.setGeometry(self.body.rect())
+        return False
+
+    def show_paused(self, on):
+        self.veil.setVisible(on)
+        self.veil.raise_()
+        self.link.setProperty("accent", on)     # Connect stands out when paused
+        self.link.style().unpolish(self.link)
+        self.link.style().polish(self.link)
+
     def set_bank(self, i):
         self.bank = self.bank_ids[i]
         self.load()
@@ -495,6 +518,7 @@ class Main(QMainWindow):
     def load(self):
         self.paused = next(b["paused"] for b in banks() if b["id"] == self.bank)
         self.link.setText("Connect" if self.paused else "Disconnect")
+        self.show_paused(self.paused)
         try:
             d = query(self.minutes, self.bank)
         except Exception as e:
