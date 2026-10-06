@@ -165,7 +165,7 @@ class Chart:
         self.frame, lay = card((12, 10, 12, 10), 6)
         # legend items break onto a second line when the card is narrow
         legend = "" if len(series) == 1 else "&nbsp;&nbsp; " + " &nbsp;".join(
-            f'<span style="color:{c}">●</span>&nbsp;<span style="color:#9aa0aa">{n}</span>'
+            f'<span style="color:{c}">●</span>&nbsp;<span style="color:#9aa0aa">{n.replace(" ", "&nbsp;")}</span>'
             for n, c in series)
         head = label(title + legend, "h2")
         head.setWordWrap(True)
