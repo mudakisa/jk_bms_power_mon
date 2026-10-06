@@ -247,7 +247,7 @@ class Main(QMainWindow):
         super().__init__()
         self.tray = None                        # before anything that fires changeEvent
         self.setWindowTitle("PowerMon")
-        self.resize(1000, 633)
+        self.resize(1154, 774)                  # 1442x968 px at a 1.25 desktop scale
         self.setMinimumSize(800, 560)
         self.minutes = 360
         self.bank = LABELS[0][0]
@@ -399,10 +399,10 @@ class Main(QMainWindow):
                 a.setText(f"{text}   no data")
                 continue
             soc, ts = now[b]
-            n = round(soc / 10)
+            n = round(soc * 7 / 100)            # 7 segments
             note = "   paused" if b in off else "   stale" if time.time() - ts > 120 else ""
             color, square = tray_level(soc)
-            a.setText(f"{text}   {square * n}{'⬛' * (10 - n)}  {soc} %{note}")
+            a.setText(f"{text}   {square * n}{'⬛' * (7 - n)}  {soc} %{note}")
             a.setIcon(battery_icon(soc, color))
 
     def open_bank(self, bank):
