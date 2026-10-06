@@ -157,19 +157,32 @@ async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
                 await client.write_gatt_char(CHAR, _cmd(CMD_DEVICE_INFO), response=False)
                 await asyncio.sleep(0.3)
                 await client.write_gatt_char(CHAR, _cmd(CMD_CELL_INFO), response=False)
+                # Watchdog. A live JK streams ~1 Hz, so silence means a stuck stream or
+                # a dead link (on a weak signal a link can stay "connected" with nothing
+                # coming through). Ask once more at 20 s (a beep), reconnect at 40 s.
+                dropped, asked = True, False
                 while client.is_connected and not stop.is_set():
                     await _sleep_or_stop(stop, 1)
-                    if name in paused(db):
+                    if name in paused(db) or stop.is_set():
+                        dropped = False
                         break
-                    # watchdog: re-request ONLY if the stream truly stalls (rare beep)
-                    if not stop.is_set() and time.time() - st["last_frame"] > 60:
-                        print(f"{name}: stream stalled >60s - re-requesting")
+                    silent = time.time() - st["last_frame"]
+                    if silent < 20:
+                        asked = False
+                    elif not asked:
+                        print(f"{name}: no data for 20s - re-requesting")
+                        await client.write_gatt_char(CHAR, _cmd(CMD_DEVICE_INFO), response=False)
+                        await asyncio.sleep(0.3)
                         await client.write_gatt_char(CHAR, _cmd(CMD_CELL_INFO), response=False)
-                        st["last_frame"] = time.time()
+                        asked = True
+                    elif silent > 40:
+                        print(f"{name}: no data for 40s - reconnecting")
+                        dropped = False
+                        break
             finally:
                 await client.disconnect()
             if not stop.is_set():
-                if name not in paused(db):
+                if dropped:
                     print(f"{name}: link lost - reconnecting")
                 continue                # paused: the top of the loop reports it
         except BleakError as e:
