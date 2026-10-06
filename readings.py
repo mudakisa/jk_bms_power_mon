@@ -51,6 +51,19 @@ def banks():
     return [{"id": b, "label": label, "paused": b in off} for b, label in LABELS]
 
 
+def latest_soc(db=DB):
+    """{bank: (soc_pct, ts)} from each bank's newest reading."""
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+    out = {}
+    for b, _ in LABELS:
+        r = con.execute("SELECT soc_pct, ts FROM readings WHERE bank=? ORDER BY ts DESC LIMIT 1",
+                        (b,)).fetchone()
+        if r:
+            out[b] = r
+    con.close()
+    return out
+
+
 def eta(con, bank, now):
     """Time to empty (discharging) or to full (charging) at the current load.
 

@@ -169,6 +169,8 @@ async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
             finally:
                 await client.disconnect()
             if not stop.is_set():
+                if name not in paused(db):
+                    print(f"{name}: link lost - reconnecting")
                 continue                # paused: the top of the loop reports it
         except BleakError as e:
             if "not found" in str(e):   # BlueZ forgot it: scan on the next try

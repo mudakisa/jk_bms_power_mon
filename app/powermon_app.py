@@ -10,12 +10,12 @@ import os, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))      # readings.py / config.py in the project root
-from readings import query, banks, set_paused, LABELS
+from readings import query, banks, latest_soc, paused, set_paused, LABELS
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QMainWindow, QMenu, QProgressBar,
@@ -73,6 +73,21 @@ def fmt_at(ms):
     if time.strftime("%x", time.localtime(at)) == time.strftime("%x"):
         return time.strftime("%H:%M", time.localtime(at))
     return time.strftime("%a %H:%M" if at - now < 6 * 86400 else "%d.%m %H:%M", time.localtime(at))
+
+
+def battery_icon(soc):
+    """A small battery filled to `soc` in its SoC colour - the tray menu's only graphics
+    (GNOME draws that menu itself: text plus one square icon per item, no widgets)."""
+    pm = QPixmap(32, 32)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(QPen(QColor(TXT), 2))
+    p.drawRoundedRect(2, 9, 24, 14, 3, 3)
+    p.fillRect(27, 13, 3, 6, QColor(TXT))
+    p.fillRect(5, 12, round(18 * soc / 100), 8, QColor(color_soc(soc)))
+    p.end()
+    return QIcon(pm)
 
 
 def card(margins=(14, 12, 14, 12), spacing=4):
@@ -352,13 +367,39 @@ class Main(QMainWindow):
         """Live in the tray: start there, minimize back there. On GNOME the tray needs
         the AppIndicator extension (on by default in Ubuntu)."""
         self.tray = QSystemTrayIcon(icon, self)
+        # one row per bank: name, a text bar of its charge, a battery icon; click = its page
         menu = QMenu(self)
-        menu.addAction("Show", self.bring_up)
+        self.bank_actions = {}
+        for b, text in LABELS:
+            a = menu.addAction(text)
+            a.setIconVisibleInMenu(True)        # the GTK theme hides menu icons otherwise
+            a.triggered.connect(lambda _=False, b=b: self.open_bank(b))
+            self.bank_actions[b] = a
+        menu.addSeparator()
         menu.addAction("Quit", QApplication.quit)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.tray_click)
         self.tray.setToolTip("PowerMon")
         self.tray.show()
+
+    def update_tray_menu(self):
+        now, off = latest_soc(), paused()
+        for b, a in self.bank_actions.items():
+            text = dict(LABELS)[b]
+            if b not in now:
+                a.setText(f"{text}   no data")
+                continue
+            soc, ts = now[b]
+            n = round(soc / 10)
+            note = "   paused" if b in off else "   stale" if time.time() - ts > 120 else ""
+            a.setText(f"{text}   {'█' * n}{'░' * (10 - n)}  {soc} %{note}")
+            a.setIcon(battery_icon(soc))
+
+    def open_bank(self, bank):
+        i = self.bank_ids.index(bank)
+        self.bank_group.button(i).setChecked(True)
+        self.set_bank(i)
+        self.bring_up()
 
     def tray_click(self, reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -465,6 +506,7 @@ class Main(QMainWindow):
             self.s_w.set(f"{'+' if L['power_w'] >= 0 else ''}{round(L['power_w'])}{unit('W')}")
             self.show_eta(L.get("eta"))
             if self.tray:
+                self.update_tray_menu()
                 eta = self.eta_sub.text()
                 self.tray.setToolTip(f"{dict(LABELS)[self.bank]}: {soc} %" + (f", {eta}" if eta else ""))
             if L["cells"]:

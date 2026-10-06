@@ -142,8 +142,8 @@ python app/powermon_app.py
 ```
 
 It lives in the tray: it starts there, minimizing sends it back, and launching it again
-opens the running window instead of a second copy. Show / Quit are in the tray icon's
-menu. On GNOME the tray needs the AppIndicator extension (enabled by default on Ubuntu);
+opens the running window instead of a second copy. The tray menu lists the banks with
+their charge; click one to open its page. Double-click the icon to show / hide the window. On GNOME the tray needs the AppIndicator extension (enabled by default on Ubuntu);
 without a tray the window simply opens.
 
 To put it in the application menu, install the launcher. Like the systemd units, it
