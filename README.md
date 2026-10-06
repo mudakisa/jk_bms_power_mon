@@ -1,19 +1,22 @@
 # PowerMon
 
 Read live telemetry from a JK-BMS (JIKONG) battery over Bluetooth and watch it on a
-local web dashboard. Pure Python, runs as a background service on Linux. It is
-**read-only** - it never writes anything to the BMS.
+local web dashboard, or in a native desktop app on Linux. Pure Python, runs as a
+background service on Linux. It is **read-only** - it never writes anything to the BMS.
 
 ![PowerMon web dashboard](docs/dashboard.png)
 
 Works with any JK-BMS that speaks the JK02_32S BLE protocol. The collector holds one
 persistent BLE connection and decodes the cell-info stream; a tiny stdlib web server
-serves the dashboard from the same data.
+serves the dashboard from the same data, and the desktop app reads it directly.
 
 ## Features
 
 - Per-cell voltages, pack voltage, current, power, state of charge, temperatures,
   cycle count, and balance delta.
+- Time left at the current load: to empty while discharging, to full while charging.
+  The load is the mean current over the last 5 minutes; the charge left comes from the
+  BMS's own counter.
 - Adaptive logging to SQLite - frequent under load, sparse when idle, and the load
   on/off edge is always captured.
 - Runs unattended under systemd, reconnects on its own, and disconnects cleanly on stop
@@ -42,6 +45,12 @@ pip install -r requirements.txt
 
 One dependency: `bleak` (the BLE library). The web dashboard and `read.py` use only the
 Python standard library.
+
+The desktop app is optional and Linux-only. It needs PySide6 (Qt), pyqtgraph and numpy:
+
+```
+pip install -r requirements-app.txt
+```
 
 ## Install
 
@@ -91,6 +100,7 @@ fine). Write volume is tiny, about 50 MB/day idle.
 python collect.py        # start logging (Ctrl-C to stop - it disconnects cleanly)
 python read.py           # one-shot read to the terminal (stop the collector first)
 python web/web.py        # serve the dashboard at http://localhost:8080
+python app/powermon_app.py   # or open the desktop app (Linux)
 ```
 
 Open http://localhost:8080.
@@ -111,6 +121,26 @@ loginctl enable-linger "$USER"   # start at boot without an active login session
 `start.sh` and `stop.sh` resume and pause the collector - handy when you want to connect
 with the phone app, since the BMS only talks to one client at a time. `dashboard.sh`
 opens the web dashboard.
+
+## Desktop app (Linux, optional)
+
+The same dashboard in a native window: no browser, no port. It reads the collector's
+database directly, so it does not need `powermon-web.service`. The web dashboard stays
+for every other platform, and both show the same numbers.
+
+![PowerMon desktop app](docs/app.png)
+
+```bash
+pip install -r requirements-app.txt
+python app/powermon_app.py
+```
+
+To put it in the application menu, install the launcher. Like the systemd units, it
+carries a `/path/to/powermon` placeholder; run this from your clone:
+
+```bash
+sed "s|/path/to/powermon|$PWD|g" app/powermon.desktop > ~/.local/share/applications/powermon.desktop
+```
 
 ## Safety
 
@@ -153,8 +183,10 @@ then add the second entry to `BANKS` in `config.py`.
 ```
 jkbms.py        protocol parser + read_cell_info() - the reusable core
 collect.py      collector daemon (BLE stream -> SQLite)
+readings.py     DB queries + time-left estimate, shared by the web and desktop dashboards
 read.py         one-shot terminal read
 web/            built-in dashboard (stdlib server + Chart.js)
+app/            desktop app for Linux (PySide6 + pyqtgraph) and its menu launcher
 config.example.py   copy to config.py and edit
 systemd/        service units
 *.sh            start / stop / dashboard helpers

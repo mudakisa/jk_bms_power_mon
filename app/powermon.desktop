@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=PowerMon
+Comment=JK-BMS battery telemetry
+Exec=/path/to/powermon/.venv/bin/python /path/to/powermon/app/powermon_app.py
+Icon=/path/to/powermon/app/powermon.svg
+Terminal=false
+Categories=System;Monitor;
+StartupWMClass=powermon

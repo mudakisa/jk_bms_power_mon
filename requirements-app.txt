@@ -1,0 +1,4 @@
+# PowerMon - desktop app dependencies (Linux, optional; the web dashboard needs none).
+PySide6-Essentials>=6.5
+pyqtgraph>=0.13
+numpy
