@@ -75,9 +75,17 @@ def fmt_at(ms):
     return time.strftime("%a %H:%M" if at - now < 6 * 86400 else "%d.%m %H:%M", time.localtime(at))
 
 
-def battery_icon(soc):
-    """A small battery filled to `soc` in its SoC colour - the tray menu's only graphics
-    (GNOME draws that menu itself: text plus one square icon per item, no widgets)."""
+# Tray menu levels. GNOME draws that menu itself as plain text plus one square icon per
+# item (no widgets, no markup), so the bar gets its colour from emoji squares.
+TRAY_LEVELS = [(25, "#d9534f", "🟥"), (60, "#e6c84f", "🟨"), (101, "#3bbf6b", "🟩")]
+
+
+def tray_level(soc):
+    return next((color, square) for limit, color, square in TRAY_LEVELS if soc < limit)
+
+
+def battery_icon(soc, color):
+    """A small battery filled to `soc` in `color`, for the tray menu."""
     pm = QPixmap(32, 32)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
@@ -85,7 +93,7 @@ def battery_icon(soc):
     p.setPen(QPen(QColor(TXT), 2))
     p.drawRoundedRect(2, 9, 24, 14, 3, 3)
     p.fillRect(27, 13, 3, 6, QColor(TXT))
-    p.fillRect(5, 12, round(18 * soc / 100), 8, QColor(color_soc(soc)))
+    p.fillRect(5, 12, round(18 * soc / 100), 8, QColor(color))
     p.end()
     return QIcon(pm)
 
@@ -380,6 +388,7 @@ class Main(QMainWindow):
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.tray_click)
         self.tray.setToolTip("PowerMon")
+        self.update_tray_menu()                 # the first load() ran before the tray existed
         self.tray.show()
 
     def update_tray_menu(self):
@@ -392,8 +401,9 @@ class Main(QMainWindow):
             soc, ts = now[b]
             n = round(soc / 10)
             note = "   paused" if b in off else "   stale" if time.time() - ts > 120 else ""
-            a.setText(f"{text}   {'█' * n}{'░' * (10 - n)}  {soc} %{note}")
-            a.setIcon(battery_icon(soc))
+            color, square = tray_level(soc)
+            a.setText(f"{text}   {square * n}{'⬛' * (10 - n)}  {soc} %{note}")
+            a.setIcon(battery_icon(soc, color))
 
     def open_bank(self, bank):
         i = self.bank_ids.index(bank)
