@@ -14,11 +14,12 @@ from readings import query, banks, set_paused, LABELS
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QFont, QIcon
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QGridLayout,
-                               QHBoxLayout, QLabel, QMainWindow, QProgressBar, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QHBoxLayout, QLabel, QMainWindow, QMenu, QProgressBar,
+                               QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 RANGES = [("30m", 30), ("1h", 60), ("6h", 360), ("24h", 1440), ("7d", 10080)]
 REFRESH = [("Off", 0), ("10s", 10_000), ("30s", 30_000), ("1m", 60_000)]
@@ -103,6 +104,26 @@ class Stat:
         self.v.setText(f'<span style="color:{color}">{html}</span>')
 
 
+class TimeAxis(pg.AxisItem):
+    """Time axis on round local-time steps, ~60 px per label. pyqtgraph's DateAxisItem
+    picks odd minute steps on a narrow chart: 6 h over ~250 px showed only the date."""
+    STEPS = [60, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800]
+
+    def tickValues(self, minVal, maxVal, size):
+        n = max(2, int(size // 60))
+        step = next((s for s in self.STEPS if (maxVal - minVal) / s <= n), self.STEPS[-1])
+        off = time.localtime(minVal).tm_gmtoff          # align steps to local midnight
+        first = ((minVal + off) // step + 1) * step - off
+        return [(step, list(np.arange(first, maxVal, step)))]
+
+    def tickStrings(self, values, scale, spacing):
+        def fmt(v):
+            t = time.localtime(v)
+            day = spacing >= 86400 or (t.tm_hour == 0 and t.tm_min == 0)
+            return time.strftime("%a %d" if day else "%H:%M", t)
+        return [fmt(v) for v in values]
+
+
 class Plot(pg.PlotWidget):
     on_leave = None
 
@@ -119,11 +140,15 @@ class Chart:
     def __init__(self, title, series, fmt="{:.2f}", fill=False, yrange=None, ymin=None):
         self.series, self.fmt, self.ymin, self.t, self.ys = series, fmt, ymin, np.array([]), []
         self.frame, lay = card((12, 10, 12, 10), 6)
-        legend = "" if len(series) == 1 else "&nbsp;&nbsp;&nbsp;" + "&nbsp;&nbsp;".join(
-            f'<span style="color:{c}">●</span> <span style="color:#9aa0aa">{n}</span>' for n, c in series)
-        lay.addWidget(label(title + legend, "h2"))
-        self.plot = Plot(background=CARD, axisItems={"bottom": pg.DateAxisItem()})
-        self.plot.setMinimumHeight(160)
+        # legend items break onto a second line when the card is narrow
+        legend = "" if len(series) == 1 else "&nbsp;&nbsp; " + " &nbsp;".join(
+            f'<span style="color:{c}">●</span>&nbsp;<span style="color:#9aa0aa">{n}</span>'
+            for n, c in series)
+        head = label(title + legend, "h2")
+        head.setWordWrap(True)
+        lay.addWidget(head)
+        self.plot = Plot(background=CARD, axisItems={"bottom": TimeAxis("bottom")})
+        self.plot.setMinimumHeight(120)
         lay.addWidget(self.plot, 1)
         pi = self.pi = self.plot.getPlotItem()
         pi.setMouseEnabled(False, False)
@@ -197,9 +222,10 @@ class Chart:
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.tray = None                        # before anything that fires changeEvent
         self.setWindowTitle("PowerMon")
-        self.resize(1500, 950)
-        self.setMinimumSize(1100, 720)
+        self.resize(1000, 633)
+        self.setMinimumSize(800, 560)
         self.minutes = 360
         self.bank = LABELS[0][0]
         self.paused = False
@@ -315,10 +341,41 @@ class Main(QMainWindow):
         }
         for i, c in enumerate(self.ch.values()):
             grid.addWidget(c.frame, i // 3, i % 3)
+        for col in range(3):
+            grid.setColumnStretch(col, 1)
         main.addLayout(grid, 1)
 
         self.load()
         self.schedule()
+
+    def setup_tray(self, icon):
+        """Live in the tray: start there, minimize back there. On GNOME the tray needs
+        the AppIndicator extension (on by default in Ubuntu)."""
+        self.tray = QSystemTrayIcon(icon, self)
+        menu = QMenu(self)
+        menu.addAction("Show", self.bring_up)
+        menu.addAction("Quit", QApplication.quit)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self.tray_click)
+        self.tray.setToolTip("PowerMon")
+        self.tray.show()
+
+    def tray_click(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            if self.isVisible() and not self.isMinimized():
+                self.hide()
+            else:
+                self.bring_up()
+
+    def bring_up(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if self.tray and e.type() == QEvent.WindowStateChange and self.isMinimized():
+            QTimer.singleShot(0, self.hide)         # minimize = into the tray
 
     def set_bank(self, i):
         self.bank = self.bank_ids[i]
@@ -407,6 +464,9 @@ class Main(QMainWindow):
             self.s_a.set(f"{signed(L['current_a'], 1)}{unit('A')}")
             self.s_w.set(f"{'+' if L['power_w'] >= 0 else ''}{round(L['power_w'])}{unit('W')}")
             self.show_eta(L.get("eta"))
+            if self.tray:
+                eta = self.eta_sub.text()
+                self.tray.setToolTip(f"{dict(LABELS)[self.bank]}: {soc} %" + (f", {eta}" if eta else ""))
             if L["cells"]:
                 self.show_cells(L["cells"])
         else:                           # no readings for this bank: don't show the last bank's
@@ -428,9 +488,16 @@ class Main(QMainWindow):
         self.ch["d"].set(t, [arr("delta_mv")])
 
 
+INSTANCE = f"powermon-app-{os.getuid()}"
+
+
 def main():
     # argv[0] "powermon" sets the X11 WM_CLASS, matching StartupWMClass in the .desktop file
     app = QApplication(["powermon"] + sys.argv[1:])
+    probe = QLocalSocket()
+    probe.connectToServer(INSTANCE)
+    if probe.waitForConnected(300):     # already running (maybe in the tray): it shows itself
+        return
     app.setApplicationName("PowerMon")
     app.setDesktopFileName("powermon")
     app.setWindowIcon(QIcon(os.path.join(HERE, "powermon.svg")))
@@ -438,7 +505,19 @@ def main():
     # 2 px antialiased lines drawn as segments, not as a stroked path: ~10x cheaper repaint
     pg.setConfigOptions(antialias=True, segmentedLineMode="on")
     w = Main()
-    w.show()
+    server = QLocalServer(w)
+    QLocalServer.removeServer(INSTANCE)        # a stale socket left by a crashed run
+    server.listen(INSTANCE)
+
+    def second_launch():
+        server.nextPendingConnection()
+        w.bring_up()
+    server.newConnection.connect(second_launch)
+
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        w.setup_tray(app.windowIcon())          # start in the tray
+    else:
+        w.show()                                # no tray to come back from
     sys.exit(app.exec())
 
 

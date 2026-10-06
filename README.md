@@ -141,6 +141,11 @@ pip install -r requirements-app.txt
 python app/powermon_app.py
 ```
 
+It lives in the tray: it starts there, minimizing sends it back, and launching it again
+opens the running window instead of a second copy. Show / Quit are in the tray icon's
+menu. On GNOME the tray needs the AppIndicator extension (enabled by default on Ubuntu);
+without a tray the window simply opens.
+
 To put it in the application menu, install the launcher. Like the systemd units, it
 carries a `/path/to/powermon` placeholder; run this from your clone:
 
