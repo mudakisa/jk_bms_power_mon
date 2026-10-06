@@ -170,6 +170,8 @@ function fmtAt(ms){
 function showEta(e){
   const v = document.getElementById("s_eta"), sub = document.getElementById("s_eta_sub");
   const card = document.getElementById("s_eta_card");
+  card.style.borderColor = !e ? "" : e.state === "charge" ? "#3bbf6b"
+                         : e.state === "discharge" ? "#e0883c" : "";
   if (!e){ v.textContent = "—"; sub.textContent = ""; card.title = ""; return; }
   const a = `${e.amps>=0?"+":""}${e.amps.toFixed(1)} A`;
   card.title = `At the mean current of the last ${Math.round(e.window_s/60)} min: to 0 % SoC `

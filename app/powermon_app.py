@@ -330,6 +330,8 @@ class Main(QMainWindow):
                       f'<span style="font-size:11px; color:{MUTED}; font-weight:400"> V</span>')
 
     def show_eta(self, e):
+        border = {"charge": "#3bbf6b", "discharge": "#e0883c"}.get(e["state"]) if e else None
+        self.s_eta.frame.setStyleSheet(f"#card {{ border:1px solid {border}; }}" if border else "")
         if not e:
             self.s_eta.set("—")
             self.eta_sub.setText("")
