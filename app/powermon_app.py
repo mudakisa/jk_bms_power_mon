@@ -112,9 +112,10 @@ class Plot(pg.PlotWidget):
 
 class Chart:
     """A chart card: title (+ legend for several series), time axis, hover readout.
-    fill: None, 0 (to zero) or "min" (to the data minimum, keeps the axis tight)."""
-    def __init__(self, title, series, fmt="{:.2f}", fill=None, yrange=None):
-        self.series, self.fmt, self.fill, self.t, self.ys = series, fmt, fill, np.array([]), []
+    fill: shade down to zero - only for smooth series; under a noisy one it costs ~3x
+    per repaint, which makes resizing the window stutter. ymin: pin the axis bottom."""
+    def __init__(self, title, series, fmt="{:.2f}", fill=False, yrange=None, ymin=None):
+        self.series, self.fmt, self.ymin, self.t, self.ys = series, fmt, ymin, np.array([]), []
         self.frame, lay = card((12, 10, 12, 10), 6)
         legend = "" if len(series) == 1 else "&nbsp;&nbsp;&nbsp;" + "&nbsp;&nbsp;".join(
             f'<span style="color:{c}">●</span> <span style="color:#9aa0aa">{n}</span>' for n, c in series)
@@ -141,8 +142,12 @@ class Chart:
             pi.setYRange(*yrange, padding=0.02)
         self.curves = []
         for _, color in series:
-            kw = {} if fill is None else dict(fillLevel=0, brush=pg.mkBrush(color + "22"))
-            self.curves.append(pi.plot([], [], pen=pg.mkPen(color, width=2), connect="finite", **kw))
+            kw = dict(fillLevel=0, brush=pg.mkBrush(color + "22")) if fill else {}
+            pen = pg.mkPen(color, width=2)
+            pen.setCapStyle(Qt.FlatCap)        # segment ends don't overlap into bright dots
+            # autoDownsampleFactor 1: "peak" keeps ~2 points per pixel (default 5 -> ~10)
+            self.curves.append(pi.plot([], [], pen=pen, connect="finite",
+                                       autoDownsampleFactor=1.0, **kw))
         self.vline = pg.InfiniteLine(angle=90, pen=pg.mkPen("#555", width=1))
         self.tip = pg.TextItem(fill=pg.mkBrush("#1d2128e6"), border=pg.mkPen(LINE))
         for item in (self.vline, self.tip):
@@ -155,8 +160,9 @@ class Chart:
         self.t, self.ys = t, ys
         for curve, y in zip(self.curves, ys):
             curve.setData(t, y)
-            if self.fill == "min" and np.isfinite(y).any():
-                curve.setFillLevel(float(np.nanmin(y)))
+        top = max((np.nanmax(y) for y in ys if np.isfinite(y).any()), default=None)
+        if self.ymin is not None and top is not None:
+            self.pi.setYRange(self.ymin, max(top, self.ymin + 1), padding=0.05)
         if len(t):
             self.pi.setXRange(t[0], t[-1], padding=0)
         self.unhover()
@@ -272,14 +278,14 @@ class Main(QMainWindow):
         grid = QGridLayout()
         grid.setSpacing(12)
         self.ch = {
-            "v": Chart("Pack voltage", [("Pack V", C["v"])], "{:.3f} V", fill="min"),
-            "a": Chart("Current (load behaviour)", [("Current", C["a"])], "{:+.2f} A", fill=0),
-            "soc": Chart("State of charge", [("SoC", C["soc"])], "{:.0f} %", fill=0, yrange=(0, 100)),
+            "v": Chart("Pack voltage", [("Pack V", C["v"])], "{:.3f} V"),
+            "a": Chart("Current (load behaviour)", [("Current", C["a"])], "{:+.2f} A"),
+            "soc": Chart("State of charge", [("SoC", C["soc"])], "{:.0f} %", fill=True, yrange=(0, 100)),
             "t": Chart("Temperatures", [("MOSFET", C["mos"]), ("Sensor 1", C["t1"]),
                                         ("Sensor 2", C["t2"])], "{:.1f} °C"),
             "cells": Chart("Cell voltages (min / avg / max)", [("Cell min", C["cmin"]),
                            ("Cell avg", C["cavg"]), ("Cell max", C["cmax"])], "{:.3f} V"),
-            "d": Chart("Cell balance delta (mV)", [("Delta", C["d"])], "{:.0f} mV", fill=0),
+            "d": Chart("Cell balance delta (mV)", [("Delta", C["d"])], "{:.0f} mV", ymin=0),
         }
         for i, c in enumerate(self.ch.values()):
             grid.addWidget(c.frame, i // 3, i % 3)
@@ -383,7 +389,8 @@ def main():
     app.setDesktopFileName("powermon")
     app.setWindowIcon(QIcon(os.path.join(HERE, "powermon.svg")))
     app.setStyleSheet(QSS)
-    pg.setConfigOptions(antialias=True)
+    # 2 px antialiased lines drawn as segments, not as a stroked path: ~10x cheaper repaint
+    pg.setConfigOptions(antialias=True, segmentedLineMode="on")
     w = Main()
     w.show()
     sys.exit(app.exec())
