@@ -141,8 +141,14 @@ pip install -r requirements-app.txt
 python app/powermon_app.py
 ```
 
-It lives in the tray: it starts there, minimizing sends it back, and launching it again
-opens the running window instead of a second copy. The tray menu lists the banks with
+It lives in the tray: minimizing sends it there, and launching it again opens the
+running window instead of a second copy. Started with `--tray` it stays hidden in the
+tray - that is the login autostart (run from your clone):
+
+```bash
+sed "s|/path/to/powermon|$PWD|g; s|^Exec=.*|& --tray|" app/powermon.desktop > ~/.config/autostart/powermon.desktop
+```
+ The tray menu lists the banks with
 their charge; click one to open its page. Double-click the icon to show / hide the window. On GNOME the tray needs the AppIndicator extension (enabled by default on Ubuntu);
 without a tray the window simply opens.
 

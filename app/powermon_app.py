@@ -4,7 +4,8 @@ Same data and layout as the web dashboard (web/), which stays for every other pl
 Both read through readings.py, so the numbers match. Read-only, like the rest.
 
     .venv/bin/pip install -r requirements-app.txt
-    .venv/bin/python app/powermon_app.py
+    .venv/bin/python app/powermon_app.py          # opens the window
+    .venv/bin/python app/powermon_app.py --tray   # starts hidden in the tray (login autostart)
 """
 import os, sys, time
 
@@ -644,10 +645,11 @@ def main():
         w.bring_up()
     server.newConnection.connect(second_launch)
 
-    if QSystemTrayIcon.isSystemTrayAvailable():
-        w.setup_tray(app.windowIcon())          # start in the tray
-    else:
-        w.show()                                # no tray to come back from
+    tray = QSystemTrayIcon.isSystemTrayAvailable()
+    if tray:
+        w.setup_tray(app.windowIcon())
+    if not (tray and "--tray" in sys.argv):     # a click on the launcher opens the window;
+        w.show()                                # --tray (login autostart) stays hidden
     sys.exit(app.exec())
 
 
