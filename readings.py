@@ -129,12 +129,15 @@ def query(minutes, bank):
     out = {"t": [int(r[0] * 1000) for r in rows]}
     for i, c in enumerate(COLS):
         out[c] = [r[i + 1] for r in rows]
+    # the BMS reports power unsigned (|V*I|); give it the current's sign: - = discharge
+    out["power_w"] = [-p if p is not None and a is not None and a < 0 else p
+                      for p, a in zip(out["power_w"], out["current_a"])]
     out["delta_mv"] = [(v * 1000 if v is not None else None) for v in out["cell_delta_v"]]
     if rows:
         last = rows[-1]
         latest = {"ts": int(last[0] * 1000)}
         for i, c in enumerate(COLS):
-            latest[c] = last[i + 1]
+            latest[c] = out[c][-1]
         latest["delta_mv"] = (last[COLS.index("cell_delta_v") + 1] or 0) * 1000
         latest["age_s"] = round(now - last[0], 1)
         try:                                   # per-cell voltages from cells_json
