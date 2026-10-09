@@ -79,7 +79,7 @@
   <span class="age" id="sig" title="Bluetooth signal of the link to this battery"></span>
   <button class="btn" id="link" title="Release the BLE link so the phone app can connect, or take it back">—</button>
   <span class="spacer"></span>
-  <div class="seg" id="ranges"></div>
+  <label class="ctl">range <select id="range"></select></label>
   <label class="ctl">refresh
     <select id="refresh">
       <option value="0">Off</option>
@@ -113,20 +113,13 @@
 </main>
 
 <script>
-const RANGES = [["30m",30],["1h",60],["6h",360],["24h",1440],["7d",10080]];
+const RANGES = [["30m",30],["1h",60],["3h",180],["6h",360],["24h",1440],["2d",2880],["7d",10080]];
 const state = { minutes: 360, refreshMs: 30000, timer: null, bank: "", me: null };
 
 // ---- build range selector
-const segEl = document.getElementById("ranges");
-RANGES.forEach(([lbl,min]) => {
-  const b = document.createElement("button");
-  b.textContent = lbl; b.dataset.min = min;
-  if (min === state.minutes) b.classList.add("on");
-  b.onclick = () => { state.minutes = min;
-    [...segEl.children].forEach(x => x.classList.toggle("on", +x.dataset.min === min));
-    load(); };
-  segEl.appendChild(b);
-});
+const rangeEl = document.getElementById("range");
+RANGES.forEach(([lbl,min]) => rangeEl.add(new Option(lbl, min, false, min === state.minutes)));
+rangeEl.onchange = (e) => { state.minutes = +e.target.value; load(); };
 document.getElementById("refresh").onchange = (e) => {
   state.refreshMs = +e.target.value; schedule();
 };

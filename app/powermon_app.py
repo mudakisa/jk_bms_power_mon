@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QG
                                QHBoxLayout, QLabel, QMainWindow, QMenu, QProgressBar,
                                QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget)
 
-RANGES = [("30m", 30), ("1h", 60), ("6h", 360), ("24h", 1440), ("7d", 10080)]
+RANGES = [("30m", 30), ("1h", 60), ("3h", 180), ("6h", 360), ("24h", 1440), ("2d", 2880),
+          ("7d", 10080)]
 REFRESH = [("Off", 0), ("10s", 10_000), ("30s", 30_000), ("1m", 60_000)]
 
 BG, CARD, LINE, TXT, MUTED = "#0e0f12", "#16181d", "#23262d", "#e6e6e6", "#8a8f98"
@@ -331,21 +332,13 @@ class Main(QMainWindow):
         h = QHBoxLayout(self.hright)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(16)
-        seg = QFrame()
-        seg.setObjectName("seg")
-        sl = QHBoxLayout(seg)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(0)
-        self.ranges = QButtonGroup(self)
+        h.addWidget(label("range", "muted"))
+        self.range_box = QComboBox()
         for name, minutes in RANGES:
-            b = QPushButton(name)
-            b.setCheckable(True)
-            b.setChecked(minutes == self.minutes)
-            b.setCursor(Qt.PointingHandCursor)
-            self.ranges.addButton(b, minutes)
-            sl.addWidget(b)
-        self.ranges.idClicked.connect(self.set_range)
-        h.addWidget(seg)
+            self.range_box.addItem(name, minutes)
+        self.range_box.setCurrentIndex(self.range_box.findData(self.minutes))
+        self.range_box.currentIndexChanged.connect(lambda _: self.set_range(self.range_box.currentData()))
+        h.addWidget(self.range_box)
         h.addWidget(label("refresh", "muted"))
         self.refresh = QComboBox()
         for name, ms in REFRESH:
