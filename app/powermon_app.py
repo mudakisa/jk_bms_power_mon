@@ -265,7 +265,12 @@ class Spark:
     def __init__(self, title, colors, fmt):
         self.fmt = fmt
         self.frame, lay = card((12, 6, 12, 6), 2)
-        lay.addWidget(label(title, "h2"))
+        top = QHBoxLayout()
+        top.addWidget(label(title, "h2"))
+        top.addStretch(1)
+        self.note = label("", "muted")             # an extra figure, e.g. the lowest cell
+        top.addWidget(self.note)
+        lay.addLayout(top)
         row = QHBoxLayout()
         row.setSpacing(6)
         edge = QVBoxLayout()
@@ -695,6 +700,8 @@ class Main(QMainWindow):
         self.mini["soc"].set(t, [arr("soc_pct")])
         self.mini["a"].set(t, [arr("current_a")])
         self.mini["v"].set(t, [arr("pack_v")])
+        cmin = arr("cell_min_v")                    # the lowest cell decides the BMS cutoff
+        self.mini["v"].note.setText(f"cell min {np.nanmin(cmin):.3f} V" if np.isfinite(cmin).any() else "")
         self.mini["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")])
 
 
