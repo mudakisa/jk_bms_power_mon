@@ -260,10 +260,23 @@ class Chart:
 
 
 class Spark:
-    """A chart thumbnail for a low window: a short title and the line, no axes."""
-    def __init__(self, title, colors):
+    """A chart thumbnail for a low window: a short title and the line, no axes - only the
+    top and bottom values of the line, written at its left edge."""
+    def __init__(self, title, colors, fmt):
+        self.fmt = fmt
         self.frame, lay = card((12, 6, 12, 6), 2)
         lay.addWidget(label(title, "h2"))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        edge = QVBoxLayout()
+        edge.setSpacing(0)
+        self.hi, self.lo = label("", "muted"), label("", "muted")
+        for w, align in ((self.hi, Qt.AlignTop), (self.lo, Qt.AlignBottom)):
+            w.setAlignment(Qt.AlignRight | align)
+        edge.addWidget(self.hi)
+        edge.addStretch(1)
+        edge.addWidget(self.lo)
+        row.addLayout(edge)
         self.plot = pg.PlotWidget(background=CARD)
         self.plot.setMinimumHeight(30)
         pi = self.pi = self.plot.getPlotItem()
@@ -276,13 +289,24 @@ class Spark:
         pi.setDownsampling(auto=True, mode="peak")
         self.curves = [pi.plot([], [], pen=pg.mkPen(c, width=1.5), connect="finite",
                                autoDownsampleFactor=1.0) for c in colors]
-        lay.addWidget(self.plot, 1)
+        row.addWidget(self.plot, 1)
+        lay.addLayout(row, 1)
 
     def set(self, t, ys):
         for curve, y in zip(self.curves, ys):
             curve.setData(t, y)
         if len(t):
             self.pi.setXRange(t[0], t[-1], padding=0)
+        vals = np.concatenate(ys) if ys else np.array([])
+        vals = vals[np.isfinite(vals)]
+        if len(vals):                   # the line spans the card, so the labels sit at its ends
+            lo, hi = vals.min(), vals.max()
+            self.pi.setYRange(lo, hi if hi > lo else lo + 1, padding=0.04)
+            self.hi.setText(self.fmt.format(hi))
+            self.lo.setText(self.fmt.format(lo))
+        else:
+            self.hi.setText("")
+            self.lo.setText("")
 
 
 class Main(QMainWindow):
@@ -440,9 +464,10 @@ class Main(QMainWindow):
         ml = QHBoxLayout(self.minis)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(12)
-        self.mini = {"soc": Spark("SoC", [C["soc"]]), "a": Spark("Current", [C["a"]]),
-                     "v": Spark("Voltage", [C["v"]]),
-                     "t": Spark("Temperatures", [C["mos"], C["t1"], C["t2"]])}
+        self.mini = {"soc": Spark("SoC", [C["soc"]], "{:.0f} %"),
+                     "a": Spark("Current", [C["a"]], "{:+.1f} A"),
+                     "v": Spark("Voltage", [C["v"]], "{:.2f} V"),
+                     "t": Spark("Temperatures", [C["mos"], C["t1"], C["t2"]], "{:.1f} °C")}
         for m in self.mini.values():
             ml.addWidget(m.frame, 1)
         self.minis.hide()
