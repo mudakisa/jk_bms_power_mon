@@ -11,7 +11,7 @@ import os, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))      # readings.py / config.py in the project root
-from readings import query, banks, latest_soc, paused, set_paused, LABELS
+from readings import query, latest, banks, latest_soc, paused, set_paused, LABELS
 
 import numpy as np
 import pyqtgraph as pg
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QG
 
 RANGES = [("30m", 30), ("1h", 60), ("3h", 180), ("6h", 360), ("24h", 1440), ("2d", 2880),
           ("7d", 10080)]
-REFRESH = [("Off", 0), ("10s", 10_000), ("30s", 30_000), ("1m", 60_000)]
+CARDS_MS, CHARTS_MS = 1000, 30_000     # cards: the newest row, live; charts: the whole range
 
 BG, CARD, LINE, TXT, MUTED = "#0e0f12", "#16181d", "#23262d", "#e6e6e6", "#8a8f98"
 GRID = "#262a31"
@@ -321,7 +321,8 @@ class Main(QMainWindow):
         self.minutes = 360
         self.bank = LABELS[0][0]
         self.paused = False
-        self.timer = QTimer(self, timeout=self.load)
+        self.cards_timer = QTimer(self, timeout=self.load_cards, interval=CARDS_MS)
+        self.charts_timer = QTimer(self, timeout=self.load_charts, interval=CHARTS_MS)
 
         root = QWidget()
         root.setObjectName("root")
@@ -330,7 +331,7 @@ class Main(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ---- header: title, banks, freshness, signal, link | range, refresh.
+        # ---- header: title, banks, freshness, signal, link | range.
         # The right group shares row 1 while it fits and drops to row 2 when the window
         # is narrow (see fit_header) - squeezed into one row the buttons got clipped.
         hdr = self.hdr = QFrame()
@@ -392,13 +393,6 @@ class Main(QMainWindow):
         self.range_box.setCurrentIndex(self.range_box.findData(self.minutes))
         self.range_box.currentIndexChanged.connect(lambda _: self.set_range(self.range_box.currentData()))
         h.addWidget(self.range_box)
-        h.addWidget(label("refresh", "muted"))
-        self.refresh = QComboBox()
-        for name, ms in REFRESH:
-            self.refresh.addItem(name, ms)
-        self.refresh.setCurrentIndex(2)
-        self.refresh.currentIndexChanged.connect(self.schedule)
-        h.addWidget(self.refresh)
         self.row1.addWidget(self.hleft)
         self.row1.addStretch(1)
         self.row1.addWidget(self.hright)
@@ -480,7 +474,8 @@ class Main(QMainWindow):
         self.tail = main.count() - 1
 
         self.load()
-        self.schedule()
+        self.cards_timer.start()
+        self.charts_timer.start()
 
     def setup_tray(self, icon):
         """Live in the tray: start there, minimize back there. On GNOME the tray needs
@@ -540,7 +535,7 @@ class Main(QMainWindow):
             QTimer.singleShot(0, self.hide)         # minimize = into the tray
 
     def fit_header(self):
-        """Range + refresh share the header row while it fits, else take a second row.
+        """The range group shares the header row while it fits, else takes a second row.
         Measured here, not in __init__: sizes are right only once the style applies."""
         self.setMinimumWidth(max(self.body.minimumSizeHint().width(),   # narrowest: the body,
                                  self.hleft.sizeHint().width() + 36,    # or one header group
@@ -592,13 +587,7 @@ class Main(QMainWindow):
 
     def set_range(self, minutes):
         self.minutes = minutes
-        self.load()
-
-    def schedule(self):
-        ms = self.refresh.currentData()
-        self.timer.stop()
-        if ms:
-            self.timer.start(ms)
+        self.load_charts()
 
     def set_dot(self, color):
         self.dot.setStyleSheet(f"background:{color}; border-radius:4px;")
@@ -647,18 +636,22 @@ class Main(QMainWindow):
         self.eta_sub.setText(f"{'full' if e['state'] == 'charge' else 'empty'} at {fmt_at(e['at'])}, {a}")
 
     def load(self):
+        self.load_cards()
+        self.load_charts()
+
+    def load_cards(self):
+        """Status, cards and tray from the bank's newest row - every second."""
         me = next(b for b in banks() if b["id"] == self.bank)
         self.paused = me["paused"]
         self.sig.setText("" if self.paused else signal_html(me["link"], me["rssi"]))
         self.link.setText("Connect" if self.paused else "Disconnect")
         self.show_paused(self.paused)
         try:
-            d = query(self.minutes, self.bank)
+            L = latest(self.bank)
         except Exception as e:
             self.set_dot("#d9534f")
             self.age.setText(f"read error: {e}")
             return
-        L = d["latest"]
         if L:
             self.set_dot("#6b7079" if self.paused else "#d9534f" if L["age_s"] > 120 else "#3bbf6b")
             self.age.setText("paused, link free" if self.paused
@@ -687,6 +680,12 @@ class Main(QMainWindow):
             self.show_eta(None)
             self.show_cells([])
 
+    def load_charts(self):
+        """Charts and thumbnails: every reading of the range - every 30 s, or on a change."""
+        try:
+            d = query(self.minutes, self.bank)
+        except Exception:
+            return                              # load_cards reports read errors
         t = np.array(d["t"], dtype=float) / 1000
         arr = lambda k: np.array(d[k], dtype=float)
         self.ch["v"].set(t, [arr("pack_v")])

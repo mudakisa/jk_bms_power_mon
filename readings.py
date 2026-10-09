@@ -118,9 +118,50 @@ def eta(con, bank, now):
     return out
 
 
-def query(minutes, bank):
+def _connect():
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=5)
     con.execute("PRAGMA busy_timeout=3000")
+    return con
+
+
+def _signed_power(p, a):
+    """The BMS reports power unsigned (|V*I|); give it the current's sign: - = discharge."""
+    return -p if p is not None and a is not None and a < 0 else p
+
+
+def _latest(con, bank, now):
+    """The bank's newest reading, of any age, with its ETA; None when it has none."""
+    r = con.execute(f"SELECT ts,{','.join(COLS)},cells_json FROM readings "
+                    "WHERE bank=? ORDER BY ts DESC LIMIT 1", (bank,)).fetchone()
+    if not r:
+        return None
+    L = {"ts": int(r[0] * 1000)}
+    for i, c in enumerate(COLS):
+        L[c] = r[i + 1]
+    L["power_w"] = _signed_power(L["power_w"], L["current_a"])
+    L["delta_mv"] = (L["cell_delta_v"] or 0) * 1000
+    L["age_s"] = round(now - r[0], 1)
+    try:                                       # per-cell voltages from cells_json
+        L["cells"] = json.loads(r[-1]) if r[-1] else []
+    except Exception:
+        L["cells"] = []
+    L["eta"] = eta(con, bank, now)
+    return L
+
+
+def latest(bank):
+    """The newest reading of a bank: one row by the (bank, ts) index - cheap enough
+    for a once-a-second refresh of the cards."""
+    con = _connect()
+    try:
+        return _latest(con, bank, time.time())
+    finally:
+        con.close()
+
+
+def query(minutes, bank):
+    """All readings of a bank over the last `minutes` (for the charts) + its latest."""
+    con = _connect()
     now = time.time()
     cutoff = now - minutes * 60
     rows = con.execute(
@@ -129,24 +170,8 @@ def query(minutes, bank):
     out = {"t": [int(r[0] * 1000) for r in rows]}
     for i, c in enumerate(COLS):
         out[c] = [r[i + 1] for r in rows]
-    # the BMS reports power unsigned (|V*I|); give it the current's sign: - = discharge
-    out["power_w"] = [-p if p is not None and a is not None and a < 0 else p
-                      for p, a in zip(out["power_w"], out["current_a"])]
+    out["power_w"] = [_signed_power(p, a) for p, a in zip(out["power_w"], out["current_a"])]
     out["delta_mv"] = [(v * 1000 if v is not None else None) for v in out["cell_delta_v"]]
-    if rows:
-        last = rows[-1]
-        latest = {"ts": int(last[0] * 1000)}
-        for i, c in enumerate(COLS):
-            latest[c] = out[c][-1]
-        latest["delta_mv"] = (last[COLS.index("cell_delta_v") + 1] or 0) * 1000
-        latest["age_s"] = round(now - last[0], 1)
-        try:                                   # per-cell voltages from cells_json
-            latest["cells"] = json.loads(last[-1]) if last[-1] else []
-        except Exception:
-            latest["cells"] = []
-        latest["eta"] = eta(con, bank, now)
-        out["latest"] = latest
-    else:
-        out["latest"] = None
+    out["latest"] = _latest(con, bank, now)
     con.close()
     return out
