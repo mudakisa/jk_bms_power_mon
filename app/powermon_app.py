@@ -259,6 +259,32 @@ class Chart:
         self.tip.hide()
 
 
+class Spark:
+    """A chart thumbnail for a low window: a short title and the line, no axes."""
+    def __init__(self, title, colors):
+        self.frame, lay = card((12, 6, 12, 6), 2)
+        lay.addWidget(label(title, "h2"))
+        self.plot = pg.PlotWidget(background=CARD)
+        self.plot.setMinimumHeight(30)
+        pi = self.pi = self.plot.getPlotItem()
+        pi.hideAxis("left")
+        pi.hideAxis("bottom")
+        pi.setMouseEnabled(False, False)
+        pi.setMenuEnabled(False)
+        pi.hideButtons()
+        pi.setClipToView(True)
+        pi.setDownsampling(auto=True, mode="peak")
+        self.curves = [pi.plot([], [], pen=pg.mkPen(c, width=1.5), connect="finite",
+                               autoDownsampleFactor=1.0) for c in colors]
+        lay.addWidget(self.plot, 1)
+
+    def set(self, t, ys):
+        for curve, y in zip(self.curves, ys):
+            curve.setData(t, y)
+        if len(t):
+            self.pi.setXRange(t[0], t[-1], padding=0)
+
+
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -409,6 +435,19 @@ class Main(QMainWindow):
         for col in range(3):
             grid.setColumnStretch(col, 1)
         main.addWidget(self.charts, 1)
+        # thumbnails for a window too low for the charts but not just for the cards
+        self.minis = QWidget()
+        ml = QHBoxLayout(self.minis)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(12)
+        self.mini = {"soc": Spark("SoC", [C["soc"]]), "a": Spark("Current", [C["a"]]),
+                     "v": Spark("Voltage", [C["v"]]),
+                     "t": Spark("Temperatures", [C["mos"], C["t1"], C["t2"]])}
+        for m in self.mini.values():
+            ml.addWidget(m.frame, 1)
+        self.minis.hide()
+        self.mode = "full"
+        main.addWidget(self.minis, 1)
         main.addStretch(0)          # gets stretch 1 when the charts hide: cards stay at the top
         self.tail = main.count() - 1
 
@@ -485,14 +524,18 @@ class Main(QMainWindow):
             (self.row2 if two else self.row1).addWidget(self.hright)
 
     def fit_body(self):
-        """A window too low for the charts keeps only the two rows of cards (stats, cells);
-        the charts come back once there is room for them again."""
+        """Below the two rows of cards (stats, cells): the charts while they fit, else a row
+        of thumbnails, else nothing - the window then shrinks to the cards."""
         cards = self.stats_row.minimumSize().height() + self.cells_row.minimumSize().height()
         self.setMinimumHeight(self.hdr.sizeHint().height() + cards + 36)   # body margins + gap
-        compact = self.body.height() < cards + self.charts.minimumSizeHint().height() + 48
-        if compact != self.charts.isHidden():
-            self.charts.setVisible(not compact)
-            self.body.layout().setStretch(self.tail, 1 if compact else 0)
+        room = self.body.height() - cards - 48
+        mode = ("full" if room >= self.charts.minimumSizeHint().height() else
+                "mini" if room >= self.minis.minimumSizeHint().height() else "cards")
+        if mode != self.mode:
+            self.mode = mode
+            self.charts.setVisible(mode == "full")
+            self.minis.setVisible(mode == "mini")
+            self.body.layout().setStretch(self.tail, 1 if mode == "cards" else 0)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -624,6 +667,10 @@ class Main(QMainWindow):
         self.ch["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")])
         self.ch["cells"].set(t, [arr("cell_min_v"), arr("cell_avg_v"), arr("cell_max_v")])
         self.ch["d"].set(t, [arr("delta_mv")])
+        self.mini["soc"].set(t, [arr("soc_pct")])
+        self.mini["a"].set(t, [arr("current_a")])
+        self.mini["v"].set(t, [arr("pack_v")])
+        self.mini["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")])
 
 
 INSTANCE = f"powermon-app-{os.getuid()}"

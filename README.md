@@ -131,7 +131,8 @@ opens the web dashboard.
 ## Desktop app (Linux, optional)
 
 The same dashboard in a native window: no browser, no port. Make the window low and
-the charts step aside, leaving the two rows of cards - a small always-visible monitor. It reads the collector's
+the charts give way to a row of thumbnails (SoC, current, voltage, temperatures), then
+to nothing but the two rows of cards - a small always-visible monitor. It reads the collector's
 database directly, so it does not need `powermon-web.service`. The web dashboard stays
 for every other platform, and both show the same numbers.
 
