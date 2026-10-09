@@ -280,7 +280,7 @@ class Main(QMainWindow):
         # ---- header: title, banks, freshness, signal, link | range, refresh.
         # The right group shares row 1 while it fits and drops to row 2 when the window
         # is narrow (see fit_header) - squeezed into one row the buttons got clipped.
-        hdr = QFrame()
+        hdr = self.hdr = QFrame()
         hdr.setObjectName("header")
         hv = QVBoxLayout(hdr)
         hv.setContentsMargins(18, 12, 18, 12)
@@ -367,7 +367,7 @@ class Main(QMainWindow):
         self.body.installEventFilter(self)
 
         # ---- stat cards
-        stats = QHBoxLayout()
+        stats = self.stats_row = QHBoxLayout()
         stats.setSpacing(12)
         self.s_soc, self.s_v, self.s_a, self.s_w, self.s_eta = (
             Stat(n) for n in ("State of charge", "Pack voltage", "Current", "Power", "ETA"))
@@ -390,7 +390,9 @@ class Main(QMainWindow):
         main.addLayout(self.cells_row)
 
         # ---- charts
-        grid = QGridLayout()
+        self.charts = QWidget()
+        grid = QGridLayout(self.charts)
+        grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(12)
         self.ch = {
             "v": Chart("Pack voltage", [("Pack V", C["v"])], "{:.3f} V"),
@@ -406,9 +408,10 @@ class Main(QMainWindow):
             grid.addWidget(c.frame, i // 3, i % 3)
         for col in range(3):
             grid.setColumnStretch(col, 1)
-        main.addLayout(grid, 1)
+        main.addWidget(self.charts, 1)
+        main.addStretch(0)          # gets stretch 1 when the charts hide: cards stay at the top
+        self.tail = main.count() - 1
 
-        self.setMinimumHeight(560)
         self.load()
         self.schedule()
 
@@ -481,13 +484,24 @@ class Main(QMainWindow):
             (self.row1 if two else self.row2).removeWidget(self.hright)
             (self.row2 if two else self.row1).addWidget(self.hright)
 
+    def fit_body(self):
+        """A window too low for the charts keeps only the two rows of cards (stats, cells);
+        the charts come back once there is room for them again."""
+        cards = self.stats_row.minimumSize().height() + self.cells_row.minimumSize().height()
+        self.setMinimumHeight(self.hdr.sizeHint().height() + cards + 36)   # body margins + gap
+        compact = self.body.height() < cards + self.charts.minimumSizeHint().height() + 48
+        if compact != self.charts.isHidden():
+            self.charts.setVisible(not compact)
+            self.body.layout().setStretch(self.tail, 1 if compact else 0)
+
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.fit_header()
 
     def eventFilter(self, obj, e):
-        if obj is self.body and e.type() == QEvent.Resize:
+        if obj is self.body and e.type() == QEvent.Resize:     # the body's own, current size
             self.veil.setGeometry(self.body.rect())
+            self.fit_body()
         return False
 
     def show_paused(self, on):
