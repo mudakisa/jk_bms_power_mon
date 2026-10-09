@@ -265,21 +265,19 @@ class Spark:
     def __init__(self, title, colors, fmt):
         self.fmt = fmt
         self.frame, lay = card((12, 6, 12, 6), 2)
-        top = QHBoxLayout()
-        top.addWidget(label(title, "h2"))
-        top.addStretch(1)
-        self.note = label("", "muted")             # an extra figure, e.g. the lowest cell
-        top.addWidget(self.note)
-        lay.addLayout(top)
+        lay.addWidget(label(title, "h2"))
         row = QHBoxLayout()
         row.setSpacing(6)
         edge = QVBoxLayout()
         edge.setSpacing(0)
         self.hi, self.lo = label("", "muted"), label("", "muted")
-        for w, align in ((self.hi, Qt.AlignTop), (self.lo, Qt.AlignBottom)):
+        self.note = label("", "muted")              # an extra figure above the bottom value
+        for w, align in ((self.hi, Qt.AlignTop), (self.note, Qt.AlignBottom),
+                         (self.lo, Qt.AlignBottom)):
             w.setAlignment(Qt.AlignRight | align)
         edge.addWidget(self.hi)
         edge.addStretch(1)
+        edge.addWidget(self.note)
         edge.addWidget(self.lo)
         row.addLayout(edge)
         self.plot = pg.PlotWidget(background=CARD)
@@ -701,7 +699,8 @@ class Main(QMainWindow):
         self.mini["a"].set(t, [arr("current_a")])
         self.mini["v"].set(t, [arr("pack_v")])
         cmin = arr("cell_min_v")                    # the lowest cell decides the BMS cutoff
-        self.mini["v"].note.setText(f"cell min {np.nanmin(cmin):.3f} V" if np.isfinite(cmin).any() else "")
+        self.mini["v"].note.setText(f'<span style="color:{C["cmin"]}">{np.nanmin(cmin):.3f} V</span>'
+                                    if np.isfinite(cmin).any() else "")
         self.mini["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")])
 
 
