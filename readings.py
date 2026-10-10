@@ -4,6 +4,7 @@ Reads the SQLite DB the collector writes (read-only) and returns the series for 
 range, the latest reading, and the time-to-empty / time-to-full estimate.
 """
 import json, os, sqlite3, time
+from datetime import datetime, timedelta
 
 try:
     from config import DB, BANKS
@@ -117,6 +118,104 @@ def eta(con, bank, now):
         out["state"], ah = "charge", nominal - remain
     out["hours"] = max(ah, 0.0) / abs(amps)
     out["at"] = int((now + out["hours"] * 3600) * 1000)
+    return out
+
+
+DAYS = 14            # the "Days" view covers the last 14 local days
+MIN_OUTAGE_S = 60    # a shorter discharge is a load surge over the charger, not an outage
+
+
+_DAYS_CACHE = {}     # bank -> (first date, finished days): those no longer change
+
+
+def days(bank, n=DAYS):
+    """The last n local days, oldest first; finished days come from a cache, so a refresh
+    only reads today."""
+    first = (datetime.now() - timedelta(days=n - 1)).replace(hour=0, minute=0, second=0,
+                                                             microsecond=0)
+    cached = _DAYS_CACHE.get(bank)
+    if cached and cached[0] == first and len(cached[1]) == n - 1:
+        return cached[1] + _days(bank, first + timedelta(days=n - 1), 1)
+    out = _days(bank, first, n)
+    _DAYS_CACHE[bank] = (first, out[:-1])
+    return out
+
+
+def _days(bank, first, n):
+    """Per local day from `first`, oldest first: how long the grid was on, off and unknown,
+    plus stats.
+
+    The BMS knows nothing of the grid, so it is read from the battery: off = discharging
+    (current <= -IDLE_A, the inverter runs the load from it); on = charging or idle.
+    A pause > BREAK_S between readings (PC asleep, link down) is unknown - not guessed.
+    Each reading holds until the next one (or until now, for a fresh last one)."""
+    now = time.time()
+    starts = [(first + timedelta(days=i)).timestamp() for i in range(n + 1)]
+    out = [{"date": (first + timedelta(days=i)).strftime("%Y-%m-%d"), "on_s": 0.0, "off_s": 0.0,
+            "outages": 0, "longest_s": 0.0, "used_wh": 0.0, "charged_wh": 0.0,
+            "soc_min": None, "cell_min": None, "segs": []} for i in range(n)]
+    con = _connect()
+    rows = con.execute("SELECT ts, current_a, power_w, soc_pct, cell_min_v FROM readings "
+                       "WHERE bank=? AND ts>=? ORDER BY ts", (bank, starts[0])).fetchall()
+    con.close()
+    day = 0
+    for i, (ts, a, p, soc, cmin) in enumerate(rows):
+        nxt = rows[i + 1][0] if i + 1 < len(rows) else now
+        if nxt - ts > BREAK_S or a is None:
+            nxt = ts                            # a hole after this reading: unknown
+        off = a is not None and a <= -IDLE_A
+        while day < n - 1 and ts >= starts[day + 1]:
+            day += 1
+        d = out[day]
+        if soc is not None:
+            d["soc_min"] = soc if d["soc_min"] is None else min(d["soc_min"], soc)
+        if cmin is not None:
+            d["cell_min"] = cmin if d["cell_min"] is None else min(d["cell_min"], cmin)
+        t0, k = ts, day                         # the span [ts, nxt), split at midnights
+        while t0 < nxt:
+            t1 = min(nxt, starts[k + 1])
+            dk, dt = out[k], t1 - t0
+            dk["off_s" if off else "on_s"] += dt
+            if p is not None:
+                if off:
+                    dk["used_wh"] += p * dt / 3600
+                elif a > IDLE_A:
+                    dk["charged_wh"] += p * dt / 3600
+            h0, h1, segs = (t0 - starts[k]) / 3600, (t1 - starts[k]) / 3600, dk["segs"]
+            if segs and segs[-1][2] == off and abs(segs[-1][1] - h0) < 1e-6:
+                segs[-1][1] = h1                # continues the previous segment
+            else:
+                segs.append([h0, h1, off])
+            t0, k = t1, k + 1 if t1 == starts[k + 1] else k
+            if k >= n:
+                break
+    for d in out:                               # short discharges count as grid on
+        merged = []
+        for a, b, off in d["segs"]:
+            if off and (b - a) * 3600 < MIN_OUTAGE_S:
+                d["off_s"] = max(0.0, d["off_s"] - (b - a) * 3600)   # float sums: no -0:00
+                d["on_s"] += (b - a) * 3600
+                off = False
+            if merged and merged[-1][2] == off and abs(merged[-1][1] - a) < 1e-6:
+                merged[-1][1] = b
+            else:
+                merged.append([a, b, off])
+        d["segs"] = merged
+    for i, d in enumerate(out):
+        span = min(now, starts[i + 1]) - starts[i]
+        d["unknown_s"] = max(0.0, span - d["on_s"] - d["off_s"])
+        # an outage = a run of grid-off segments; a hole between two of them (no data,
+        # e.g. a weak link) doesn't split it - only grid-on does. Its length is the known
+        # grid-off time in it; one going on past midnight counts in both days.
+        runs, last = [], None
+        for a, b, off in d["segs"]:
+            if off:
+                if last:
+                    runs[-1] += (b - a) * 3600
+                else:
+                    runs.append((b - a) * 3600)
+            last = off
+        d["outages"], d["longest_s"] = len(runs), max(runs, default=0.0)
     return out
 
 

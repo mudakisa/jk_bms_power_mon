@@ -8,17 +8,19 @@ Both read through readings.py, so the numbers match. Read-only, like the rest.
     .venv/bin/python app/powermon_app.py --tray   # starts hidden in the tray (login autostart)
 """
 import os, sys, time
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))      # readings.py / config.py in the project root
-from readings import query, latest, banks, latest_soc, paused, set_paused, LABELS
+from readings import query, latest, days, banks, latest_soc, paused, set_paused, LABELS
 
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QGridLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QComboBox,
+                               QFrame, QGridLayout, QHeaderView, QTableWidget, QTableWidgetItem,
                                QHBoxLayout, QLabel, QMainWindow, QMenu, QProgressBar,
                                QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget)
 
@@ -54,6 +56,11 @@ QComboBox::down-arrow {{ image:url({os.path.join(HERE, "arrow.svg")}); width:9px
 QComboBox QAbstractItemView {{ background:#1d2128; color:{TXT}; selection-background-color:#2a4c7a; }}
 QToolTip {{ background:#1d2128; color:{TXT}; border:1px solid {LINE}; }}
 QProgressBar {{ background:{LINE}; border:0; border-radius:3px; }}
+QTableWidget {{ background:{CARD}; color:{TXT}; border:0; gridline-color:{LINE}; font-size:13px; }}
+QHeaderView::section {{ background:{CARD}; color:{MUTED}; border:0; border-bottom:1px solid {LINE};
+                       padding:4px 6px; font-size:12px; }}
+QTableCornerButton::section {{ background:{CARD}; border:0; }}
+QGraphicsView {{ background:{CARD}; border:0; }}   /* plots: no light sliver at a fractional edge */
 """
 
 
@@ -331,6 +338,118 @@ class Spark:
             self.lo.setText("")
 
 
+def hm(seconds):
+    return f"{int(seconds // 3600)}:{int(seconds % 3600 // 60):02d}"
+
+
+GRID_ON, GRID_OFF, NO_DATA = "#3bbf6b", "#d9534f", "#2a2e36"
+DAY_COLS = [("Day", None), ("Off", "Grid off: the battery was discharging (the inverter ran the "
+            "load from it)"), ("On", "Grid on: the battery was charging or idle"),
+            ("No data", "PC asleep or link down - counted neither way"),
+            ("Outages", "Stretches of grid off of a minute or more (a shorter discharge is a load "
+             "surge); one going on past midnight counts in both days"),
+            ("Longest", "The longest stretch of grid off that day"),
+            ("kWh out", "Energy taken from the battery while the grid was off"),
+            ("kWh in", "Energy put into the battery"), ("SoC min", None), ("Cell min", None)]
+
+
+class DaysView:
+    """The "Days" range: per day, a 24 h strip of grid on / off / no data (left) and a
+    table of the day's figures (right) - in place of the charts."""
+    def __init__(self):
+        self.widget = QWidget()
+        row = QHBoxLayout(self.widget)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        left, lay = card((12, 10, 12, 10), 6)
+        legend = "&nbsp;&nbsp;".join(f'<span style="color:{c}">●</span> <span style="color:#9aa0aa">{n}</span>'
+                                     for n, c in (("on", GRID_ON), ("off", GRID_OFF), ("no data", "#555b66")))
+        lay.addWidget(label(f"Grid by day&nbsp;&nbsp;&nbsp;{legend}", "h2"))
+        self.plot = pg.PlotWidget(background=CARD)
+        self.plot.setMinimumHeight(160)
+        pi = self.pi = self.plot.getPlotItem()
+        pi.setMouseEnabled(False, False)
+        pi.setMenuEnabled(False)
+        pi.hideButtons()
+        tick = QFont()
+        tick.setPointSize(8)
+        for ax in ("left", "bottom"):
+            a = pi.getAxis(ax)
+            a.setPen(GRID)
+            a.setTextPen("#777")
+            a.setStyle(tickFont=tick)
+        pi.getAxis("bottom").setTicks([[(h, f"{h:02d}") for h in range(0, 24, 3)]])
+        pi.showGrid(x=True, y=False, alpha=1.0)
+        pi.setXRange(0, 24, padding=0.01)
+        lay.addWidget(self.plot, 1)
+        self.bars = []
+        right, rlay = card((12, 10, 12, 10), 6)
+        self.table = QTableWidget(0, len(DAY_COLS))
+        for i, (name, tip) in enumerate(DAY_COLS):
+            item = QTableWidgetItem(name)
+            if tip:
+                item.setToolTip(tip)
+            self.table.setHorizontalHeaderItem(i, item)
+        self.table.verticalHeader().hide()
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.setFocusPolicy(Qt.NoFocus)
+        self.table.setShowGrid(False)
+        self.table.setMinimumHeight(160)
+        rlay.addWidget(self.table, 1)
+        row.addWidget(left, 2)
+        row.addWidget(right, 3)
+
+    def show(self, ds):
+        """ds: readings.days() - oldest first; the strip puts the newest day on top."""
+        for b in self.bars:
+            self.pi.removeItem(b)
+        n = len(ds)
+        x0 = {GRID_ON: [], GRID_OFF: []}
+        x1, y = {GRID_ON: [], GRID_OFF: []}, {GRID_ON: [], GRID_OFF: []}
+        for i, d in enumerate(ds):
+            for a, b, off in d["segs"]:
+                c = GRID_OFF if off else GRID_ON
+                x0[c].append(a)
+                x1[c].append(b)
+                y[c].append(i)
+        today = (time.time() - datetime.now().replace(hour=0, minute=0, second=0).timestamp()) / 3600
+        self.bars = [pg.BarGraphItem(x0=[0] * n, x1=[24] * (n - 1) + [today],   # today: until now
+                                     y0=[i - 0.36 for i in range(n)], y1=[i + 0.36 for i in range(n)],
+                                     brush=NO_DATA, pen=pg.mkPen(None))]
+        for c in (GRID_ON, GRID_OFF):
+            if x0[c]:
+                self.bars.append(pg.BarGraphItem(x0=x0[c], x1=x1[c], y0=[v - 0.36 for v in y[c]],
+                                                 y1=[v + 0.36 for v in y[c]], brush=c,
+                                                 pen=pg.mkPen(None)))      # None = default outline
+        for b in self.bars:
+            self.pi.addItem(b)
+        self.pi.getAxis("left").setTicks([[(i, datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d"))
+                                           for i, d in enumerate(ds)]])
+        self.pi.setYRange(-0.6, n - 0.4, padding=0)
+        self.table.setRowCount(n)
+        for r, d in enumerate(reversed(ds)):            # newest first
+            known = d["on_s"] + d["off_s"] > 0
+            cells = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d.%m"),
+                     hm(d["off_s"]) if known else "—", hm(d["on_s"]) if known else "—",
+                     hm(d["unknown_s"]), str(d["outages"]) if known else "—",
+                     hm(d["longest_s"]) if d["outages"] else "—",
+                     f"{d['used_wh'] / 1000:.2f}" if known else "—",
+                     f"{d['charged_wh'] / 1000:.2f}" if known else "—",
+                     f"{d['soc_min']} %" if d["soc_min"] is not None else "—",
+                     f"{d['cell_min']:.3f} V" if d["cell_min"] is not None else "—"]
+            for c, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignVCenter | (Qt.AlignLeft if c == 0 else Qt.AlignRight))
+                if c == 1 and d["off_s"] > 0:
+                    item.setForeground(QColor(GRID_OFF))
+                elif text == "—" or (c == 3 and d["unknown_s"] < 60):
+                    item.setForeground(QColor(MUTED))
+                self.table.setItem(r, c, item)
+
+
 class Main(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -409,6 +528,7 @@ class Main(QMainWindow):
         self.range_box = QComboBox()
         for name, minutes in RANGES:
             self.range_box.addItem(name, minutes)
+        self.range_box.addItem("Days", 0)           # 0 = the per-day view, not a time range
         self.range_box.setCurrentIndex(self.range_box.findData(self.minutes))
         self.range_box.currentIndexChanged.connect(lambda _: self.set_range(self.range_box.currentData()))
         h.addWidget(self.range_box)
@@ -475,6 +595,10 @@ class Main(QMainWindow):
         for col in range(3):
             grid.setColumnStretch(col, 1)
         main.addWidget(self.charts, 1)
+        self.days_mode = False
+        self.daysv = DaysView()                     # the "Days" range: in place of the charts
+        self.daysv.widget.hide()
+        main.addWidget(self.daysv.widget, 1)
         # thumbnails for a window too low for the charts but not just for the cards
         self.minis = QWidget()
         ml = QHBoxLayout(self.minis)
@@ -571,11 +695,14 @@ class Main(QMainWindow):
         cards = self.stats_row.minimumSize().height() + self.cells_row.minimumSize().height()
         self.setMinimumHeight(self.hdr.sizeHint().height() + cards + 36)   # body margins + gap
         room = self.body.height() - cards - 48
-        mode = ("full" if room >= self.charts.minimumSizeHint().height() else
-                "mini" if room >= self.minis.minimumSizeHint().height() else "cards")
+        big = self.daysv.widget if self.days_mode else self.charts
+        mode = ("full" if room >= big.minimumSizeHint().height() else
+                "mini" if not self.days_mode and room >= self.minis.minimumSizeHint().height()
+                else "cards")
         if mode != self.mode:
             self.mode = mode
-            self.charts.setVisible(mode == "full")
+            self.charts.setVisible(mode == "full" and not self.days_mode)
+            self.daysv.widget.setVisible(mode == "full" and self.days_mode)
             self.minis.setVisible(mode == "mini")
             self.body.layout().setStretch(self.tail, 1 if mode == "cards" else 0)
 
@@ -605,7 +732,11 @@ class Main(QMainWindow):
         self.load()
 
     def set_range(self, minutes):
-        self.minutes = minutes
+        self.days_mode = minutes == 0
+        if minutes:
+            self.minutes = minutes
+        self.mode = None                            # re-pick what goes below the cards
+        self.fit_body()
         self.load_charts()
 
     def set_dot(self, color):
@@ -701,6 +832,12 @@ class Main(QMainWindow):
 
     def load_charts(self):
         """Charts and thumbnails: every reading of the range - every 30 s, or on a change."""
+        if self.days_mode:
+            try:
+                self.daysv.show(days(self.bank))
+            except Exception:
+                pass                                # load_cards reports read errors
+            return
         try:
             d = query(self.minutes, self.bank)
         except Exception:

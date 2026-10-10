@@ -16,6 +16,11 @@ serves the dashboard from the same data, and the desktop app reads it directly.
   cycle count, and balance delta.
 - Several banks on one Bluetooth adapter. Switch between them in the dashboard header;
   Disconnect frees one bank's link for the phone app, Connect takes it back.
+- A "Days" view (desktop app): per day over the last two weeks, a 24 h strip of grid on /
+  off / no data and a table - how long the grid was off and on, outages, the longest,
+  energy out of and into the battery, lowest SoC and cell. The battery knows nothing of
+  the grid, so it is read from it: discharging = grid off, charging or idle = grid on;
+  time without data is counted neither way, and a discharge under a minute is a load surge.
 - Time left at the current load: to empty while discharging, to full while charging.
   The load is the mean current over the last 5 minutes; the charge left comes from the
   BMS's own counter.
