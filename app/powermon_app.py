@@ -58,7 +58,7 @@ QToolTip {{ background:#1d2128; color:{TXT}; border:1px solid {LINE}; }}
 QProgressBar {{ background:{LINE}; border:0; border-radius:3px; }}
 QTableWidget {{ background:{CARD}; color:{TXT}; border:0; gridline-color:{LINE}; font-size:13px; }}
 QHeaderView::section {{ background:{CARD}; color:{MUTED}; border:0; border-bottom:1px solid {LINE};
-                       padding:4px 6px; font-size:12px; }}
+                       padding:4px 2px; font-size:12px; }}
 QTableCornerButton::section {{ background:{CARD}; border:0; }}
 QGraphicsView {{ background:{CARD}; border:0; }}   /* plots: no light sliver at a fractional edge */
 """
@@ -346,16 +346,17 @@ def hm(seconds):
 GRID_ON, GRID_OFF, NO_DATA, HATCH = "#2f8f5b", "#ef6461", "#1e2127", "#4a505c"
 DAY_COLS = [("Day", None), ("Off", "Grid off: the battery was discharging (the inverter ran the "
             "load from it)"), ("On", "Grid on: the battery was charging or idle"),
-            ("No data", "PC asleep or link down - counted neither way"),
+            ("No\ndata", "PC asleep or link down - counted neither way"),
             ("Outages", "Stretches of grid off of a minute or more (a shorter discharge is a load "
              "surge); one going on past midnight counts in both days"),
-            ("kWh out", "Energy taken from the battery while the grid was off"),
-            ("kWh in", "Energy put into the battery"), ("SoC min", None), ("Cell min", None)]
+            ("kWh\nout", "Energy taken from the battery while the grid was off"),
+            ("kWh\nin", "Energy put into the battery"), ("SoC\nmin", None), ("Cell\nmin", None)]
 
 
 class DayStrip(QWidget):
-    """Uptime-style strips, newest day on top: a rounded track per day, hatched where
-    there is no data, with grid-on / grid-off pieces over it; faint hour guides behind."""
+    """Newest day on top; per day 24 rounded hour cells, inside each the grid on / off
+    pieces exact to the minute, grey-hatched where there is no data. Today's cells stop
+    at now."""
     def __init__(self):
         super().__init__()
         self.ds = []
@@ -374,30 +375,36 @@ class DayStrip(QWidget):
         f = QFont()
         f.setPixelSize(11)
         p.setFont(f)
-        left, top, bottom = 58, 4, 20
+        left, top, bottom, gap = 58, 4, 20, 2.5
         n, w = len(self.ds), self.width() - 58 - 6
         rowh = (self.height() - top - bottom) / n
+        cw = w / 24 - gap
+        ch = min(rowh - 6, 18.0, cw)                # square-ish cells
         hx = lambda h: left + w * h / 24
-        for h in range(25):                     # hour guides, stronger every 3 h
-            p.setPen(QColor("#353a44" if h % 3 == 0 else "#24272e"))
-            p.drawLine(round(hx(h)), top, round(hx(h)), round(top + rowh * n))
         now = (time.time() - datetime.now().replace(hour=0, minute=0, second=0).timestamp()) / 3600
-        th = min(12.0, rowh * 0.45)
         for r, d in enumerate(reversed(self.ds)):
             y = top + r * rowh
             p.setPen(QColor(TXT if r == 0 else MUTED))
             p.drawText(QRectF(0, y, left - 10, rowh), Qt.AlignRight | Qt.AlignVCenter,
                        datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d"))
-            ty, end = y + (rowh - th) / 2, now if r == 0 else 24     # today: until now
-            track = QPainterPath()
-            track.addRoundedRect(QRectF(hx(0), ty, hx(end) - hx(0), th), th / 2, th / 2)
-            p.fillPath(track, QColor(NO_DATA))
-            p.fillPath(track, QBrush(QColor(HATCH), Qt.BDiagPattern))
-            p.setPen(Qt.NoPen)
-            for a, b, off in d["segs"]:
-                sw = max(hx(b) - hx(a), 1.5)
-                p.setBrush(QColor(GRID_OFF if off else GRID_ON))
-                p.drawRoundedRect(QRectF(hx(a), ty, sw, th), min(th, sw) / 2, min(th, sw) / 2)
+            end, cy = (now if r == 0 else 24), y + (rowh - ch) / 2
+            for h in range(24):
+                if h >= end:
+                    break
+                cell = QRectF(hx(h) + gap / 2, cy, max(cw * min(1.0, end - h), 3.0), ch)
+                path = QPainterPath()
+                path.addRoundedRect(cell, 3, 3)
+                p.save()
+                p.setClipPath(path)
+                p.fillPath(path, QColor(NO_DATA))
+                p.fillPath(path, QBrush(QColor(HATCH), Qt.BDiagPattern))
+                for a, b, off in d["segs"]:
+                    a2, b2 = max(a, h), min(b, h + 1)
+                    if b2 > a2:
+                        x0 = cell.left() + (a2 - h) * cw
+                        p.fillRect(QRectF(x0, cy, max((b2 - a2) * cw, 1.0), ch),
+                                   QColor(GRID_OFF if off else GRID_ON))
+                p.restore()
         p.setPen(QColor("#777"))
         for h in range(0, 24, 3):
             p.drawText(QRectF(hx(h) - 15, top + rowh * n + 4, 30, 14), Qt.AlignCenter, f"{h:02d}")
@@ -427,15 +434,16 @@ class DaysView:
             self.table.setHorizontalHeaderItem(i, item)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for c in (0, 4):                            # Day and Outages: as wide as their text
+            self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.NoSelection)
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setShowGrid(False)
         self.table.setMinimumHeight(160)
         rlay.addWidget(self.table, 1)
-        row.addWidget(left, 2)
-        row.addWidget(right, 3)
+        row.addWidget(left, 5)
+        row.addWidget(right, 6)
 
     def show(self, ds):
         """ds: readings.days() - oldest first; the strip puts the newest day on top."""
