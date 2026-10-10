@@ -17,7 +17,7 @@ from readings import query, latest, days, banks, latest_soc, paused, set_paused,
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QComboBox,
                                QFrame, QGridLayout, QHeaderView, QTableWidget, QTableWidgetItem,
@@ -342,13 +342,14 @@ def hm(seconds):
     return f"{int(seconds // 3600)}:{int(seconds % 3600 // 60):02d}"
 
 
-GRID_ON, GRID_OFF, NO_DATA = "#3bbf6b", "#d9534f", "#2a2e36"
+# grid on is the normal state - a muted green (pre-mixed with the card: Qt reads #rrggbbaa as
+# #aarrggbb); grid off is what the view is for; no data is hatched
+GRID_ON, GRID_OFF, NO_DATA = "#235238", "#d65f59", "#4a505c"
 DAY_COLS = [("Day", None), ("Off", "Grid off: the battery was discharging (the inverter ran the "
             "load from it)"), ("On", "Grid on: the battery was charging or idle"),
             ("No data", "PC asleep or link down - counted neither way"),
             ("Outages", "Stretches of grid off of a minute or more (a shorter discharge is a load "
              "surge); one going on past midnight counts in both days"),
-            ("Longest", "The longest stretch of grid off that day"),
             ("kWh out", "Energy taken from the battery while the grid was off"),
             ("kWh in", "Energy put into the battery"), ("SoC min", None), ("Cell min", None)]
 
@@ -363,7 +364,7 @@ class DaysView:
         row.setSpacing(12)
         left, lay = card((12, 10, 12, 10), 6)
         legend = "&nbsp;&nbsp;".join(f'<span style="color:{c}">●</span> <span style="color:#9aa0aa">{n}</span>'
-                                     for n, c in (("on", GRID_ON), ("off", GRID_OFF), ("no data", "#555b66")))
+                                     for n, c in (("on", "#3bbf6b"), ("off", GRID_OFF), ("no data", NO_DATA)))
         lay.addWidget(label(f"Grid by day&nbsp;&nbsp;&nbsp;{legend}", "h2"))
         self.plot = pg.PlotWidget(background=CARD)
         self.plot.setMinimumHeight(160)
@@ -377,9 +378,12 @@ class DaysView:
             a = pi.getAxis(ax)
             a.setPen(GRID)
             a.setTextPen("#777")
-            a.setStyle(tickFont=tick)
+            a.setStyle(tickFont=tick, tickLength=0)
         pi.getAxis("bottom").setTicks([[(h, f"{h:02d}") for h in range(0, 24, 3)]])
-        pi.showGrid(x=True, y=False, alpha=1.0)
+        for h in range(1, 24):                  # hour cells: a cut in the card colour, wider every 3 h
+            cut = pg.InfiniteLine(pos=h, angle=90, pen=pg.mkPen(CARD, width=2 if h % 3 == 0 else 1))
+            cut.setZValue(10)
+            pi.addItem(cut)
         pi.setXRange(0, 24, padding=0.01)
         lay.addWidget(self.plot, 1)
         self.bars = []
@@ -416,14 +420,16 @@ class DaysView:
                 x1[c].append(b)
                 y[c].append(i)
         today = (time.time() - datetime.now().replace(hour=0, minute=0, second=0).timestamp()) / 3600
+        h = 0.3                                     # half a strip: gaps between the days
         self.bars = [pg.BarGraphItem(x0=[0] * n, x1=[24] * (n - 1) + [today],   # today: until now
-                                     y0=[i - 0.36 for i in range(n)], y1=[i + 0.36 for i in range(n)],
-                                     brush=NO_DATA, pen=pg.mkPen(None))]
+                                     y0=[i - h for i in range(n)], y1=[i + h for i in range(n)],
+                                     brush=QBrush(QColor(NO_DATA), Qt.BDiagPattern),
+                                     pen=pg.mkPen(None))]                 # None = default outline
         for c in (GRID_ON, GRID_OFF):
             if x0[c]:
-                self.bars.append(pg.BarGraphItem(x0=x0[c], x1=x1[c], y0=[v - 0.36 for v in y[c]],
-                                                 y1=[v + 0.36 for v in y[c]], brush=c,
-                                                 pen=pg.mkPen(None)))      # None = default outline
+                self.bars.append(pg.BarGraphItem(x0=x0[c], x1=x1[c], y0=[v - h for v in y[c]],
+                                                 y1=[v + h for v in y[c]], brush=c,
+                                                 pen=pg.mkPen(None)))
         for b in self.bars:
             self.pi.addItem(b)
         self.pi.getAxis("left").setTicks([[(i, datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d"))
@@ -435,7 +441,6 @@ class DaysView:
             cells = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d.%m"),
                      hm(d["off_s"]) if known else "—", hm(d["on_s"]) if known else "—",
                      hm(d["unknown_s"]), str(d["outages"]) if known else "—",
-                     hm(d["longest_s"]) if d["outages"] else "—",
                      f"{d['used_wh'] / 1000:.2f}" if known else "—",
                      f"{d['charged_wh'] / 1000:.2f}" if known else "—",
                      f"{d['soc_min']} %" if d["soc_min"] is not None else "—",

@@ -152,7 +152,7 @@ def _days(bank, first, n):
     now = time.time()
     starts = [(first + timedelta(days=i)).timestamp() for i in range(n + 1)]
     out = [{"date": (first + timedelta(days=i)).strftime("%Y-%m-%d"), "on_s": 0.0, "off_s": 0.0,
-            "outages": 0, "longest_s": 0.0, "used_wh": 0.0, "charged_wh": 0.0,
+            "outages": 0, "used_wh": 0.0, "charged_wh": 0.0,
             "soc_min": None, "cell_min": None, "segs": []} for i in range(n)]
     con = _connect()
     rows = con.execute("SELECT ts, current_a, power_w, soc_pct, cell_min_v FROM readings "
@@ -205,17 +205,13 @@ def _days(bank, first, n):
         span = min(now, starts[i + 1]) - starts[i]
         d["unknown_s"] = max(0.0, span - d["on_s"] - d["off_s"])
         # an outage = a run of grid-off segments; a hole between two of them (no data,
-        # e.g. a weak link) doesn't split it - only grid-on does. Its length is the known
-        # grid-off time in it; one going on past midnight counts in both days.
-        runs, last = [], None
+        # e.g. a weak link) doesn't split it - only grid-on does. One going on past
+        # midnight counts in both days.
+        last = None
         for a, b, off in d["segs"]:
-            if off:
-                if last:
-                    runs[-1] += (b - a) * 3600
-                else:
-                    runs.append((b - a) * 3600)
+            if off and not last:
+                d["outages"] += 1
             last = off
-        d["outages"], d["longest_s"] = len(runs), max(runs, default=0.0)
     return out
 
 
