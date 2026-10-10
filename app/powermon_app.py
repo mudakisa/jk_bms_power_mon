@@ -361,6 +361,7 @@ class DayStrip(QWidget):
         super().__init__()
         self.ds = []
         self.setMinimumHeight(160)
+        self.setMinimumWidth(270)                   # labels + 24 cells still readable
 
     def set(self, ds):
         self.ds = ds
@@ -375,11 +376,12 @@ class DayStrip(QWidget):
         f = QFont()
         f.setPixelSize(11)
         p.setFont(f)
-        left, top, bottom, gap = 58, 4, 20, 2.5
+        left, top, bottom = 58, 4, 20
         n, w = len(self.ds), self.width() - 58 - 6
+        gap = 2.5 if w / 24 >= 14 else 1.5          # narrow (a portrait monitor): tighter cells
         rowh = (self.height() - top - bottom) / n
         cw = w / 24 - gap
-        ch = min(rowh - 6, 18.0, cw)                # square-ish cells
+        ch = min(rowh - 6, 18.0, max(cw, 12.0))     # square-ish; a bit taller when narrow
         hx = lambda h: left + w * h / 24
         now = (time.time() - datetime.now().replace(hour=0, minute=0, second=0).timestamp()) / 3600
         for r, d in enumerate(reversed(self.ds)):
@@ -441,9 +443,11 @@ class DaysView:
         self.table.setFocusPolicy(Qt.NoFocus)
         self.table.setShowGrid(False)
         self.table.setMinimumHeight(160)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         rlay.addWidget(self.table, 1)
         row.addWidget(left, 5)
         row.addWidget(right, 6)
+        self.right = right
 
     def show(self, ds):
         """ds: readings.days() - oldest first; the strip puts the newest day on top."""
@@ -467,6 +471,14 @@ class DaysView:
                 elif text == "—" or (c == 3 and d["unknown_s"] < 60):
                     item.setForeground(QColor(MUTED))
                 self.table.setItem(r, c, item)
+        # the table never gets narrower than its columns need (a room is kept for the
+        # vertical scrollbar): when the window narrows, the strip gives way first
+        t, hdr = self.table, self.table.horizontalHeader()
+        want = [max(hdr.sectionSizeHint(c), t.sizeHintForColumn(c)) for c in range(t.columnCount())]
+        fit = [c for c in range(t.columnCount()) if hdr.sectionResizeMode(c) == QHeaderView.ResizeToContents]
+        stretch = [w for c, w in enumerate(want) if c not in fit]      # Stretch splits evenly
+        need = sum(want[c] for c in fit) + len(stretch) * max(stretch)
+        self.right.setMinimumWidth(need + t.verticalScrollBar().sizeHint().width() + 2 * t.frameWidth() + 24)
 
 
 class Main(QMainWindow):
@@ -856,7 +868,9 @@ class Main(QMainWindow):
                 self.daysv.show(days(self.bank))
             except Exception:
                 pass                                # load_cards reports read errors
+            QTimer.singleShot(0, self.fit_header)   # min width: once the table has relaid out
             return
+        QTimer.singleShot(0, self.fit_header)       # back from Days: the minimum shrinks again
         try:
             d = query(self.minutes, self.bank)
         except Exception:
