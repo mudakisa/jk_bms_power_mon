@@ -481,8 +481,11 @@ class DaysView:
             f.setAttribute(Qt.WA_TransparentForMouseEvents)
             f.hide()
             self.total_frames.append(f)
-        self.table.horizontalHeader().sectionResized.connect(self.place_total_frames)
-        self.table.verticalScrollBar().valueChanged.connect(self.place_total_frames)
+        # re-place once the columns settle (sectionResized fires per column, mid-relayout)
+        self.place_soon = QTimer(self.widget, singleShot=True, interval=0,
+                                 timeout=self.place_total_frames)
+        self.table.horizontalHeader().sectionResized.connect(self.place_soon.start)
+        self.table.verticalScrollBar().valueChanged.connect(self.place_soon.start)
         self.table.verticalScrollBar().valueChanged.connect(self.strip.update)
         rlay.addWidget(self.table, 1)
         left.setMaximumWidth(STRIP_W)               # a set width; the table takes the rest and,
@@ -491,14 +494,24 @@ class DaysView:
         self.right = right
 
     def place_total_frames(self, *_):
+        """Frame the Total row's groups. Figures are right-aligned, so two groups meet in
+        the middle of the gap between this row's figures, not at the column edge."""
         t = self.table
         row = t.rowCount() - 1
-        for (c0, c1), f in zip(self.total_groups, self.total_frames):
-            if row < 0:
+        if row < 0:
+            for f in self.total_frames:
                 f.hide()
-                continue
-            r = t.visualRect(t.model().index(row, c0)).united(t.visualRect(t.model().index(row, c1)))
-            f.setGeometry(r.adjusted(2, 1, -1, -3))     # 1 up: even room above and below the figures
+            return
+        fm, pad = t.fontMetrics(), 6                # item padding (3) + the style's margin
+        cell = lambda c: t.visualRect(t.model().index(row, c))
+        ink_right = lambda c: cell(c).right() - pad
+        ink_left = lambda c: ink_right(c) - fm.horizontalAdvance(t.item(row, c).text())
+        groups = self.total_groups
+        for g, ((c0, c1), f) in enumerate(zip(groups, self.total_frames)):
+            x0 = cell(c0).left() + 2 if g == 0 else (ink_right(groups[g - 1][1]) + ink_left(c0)) // 2 + 2
+            x1 = cell(c1).right() - 1 if g == len(groups) - 1 else (ink_right(c1) + ink_left(groups[g + 1][0])) // 2 - 2
+            r = cell(c0)
+            f.setGeometry(x0, r.top() + 1, x1 - x0, r.height() - 4)   # even room above / below
             f.show()
 
     def show(self, ds):
@@ -557,7 +570,7 @@ class DaysView:
         stretch = [w for c, w in enumerate(want) if c not in fit]      # Stretch splits evenly
         need = sum(want[c] for c in fit) + len(stretch) * max(stretch)
         self.right.setMinimumWidth(need + t.verticalScrollBar().sizeHint().width() + 2 * t.frameWidth() + 24)
-        QTimer.singleShot(0, self.place_total_frames)  # once the columns have their widths
+        self.place_soon.start()                     # once the columns have their widths
 
 
 class Main(QMainWindow):
