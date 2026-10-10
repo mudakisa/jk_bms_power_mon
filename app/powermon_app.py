@@ -360,6 +360,7 @@ class DayStrip(QWidget):
     def __init__(self):
         super().__init__()
         self.ds = []
+        self.table = None                           # rows sit level with this table's rows
         self.setMinimumHeight(160)
         self.setMinimumWidth(270)                   # labels + 24 cells still readable
 
@@ -379,13 +380,16 @@ class DayStrip(QWidget):
         left, top, bottom = 58, 4, 20
         n, w = len(self.ds), self.width() - 58 - 6
         gap = 2.5 if w / 24 >= 14 else 1.5          # narrow (a portrait monitor): tighter cells
-        rowh = (self.height() - top - bottom) / n
+        rows = self.row_spans(n, top, (self.height() - top - bottom) / n)
+        rowh = rows[0][1] if rows else 20
         cw = w / 24 - gap
         ch = min(rowh - 6, 18.0, max(cw, 12.0))     # square-ish; a bit taller when narrow
         hx = lambda h: left + w * h / 24
         now = (time.time() - datetime.now().replace(hour=0, minute=0, second=0).timestamp()) / 3600
         for r, d in enumerate(reversed(self.ds)):
-            y = top + r * rowh
+            y, rowh = rows[r]
+            if y + rowh < 0 or y > self.height() - bottom:
+                continue                            # scrolled out of the table's view
             p.setPen(QColor(TXT if r == 0 else MUTED))
             p.drawText(QRectF(0, y, left - 10, rowh), Qt.AlignRight | Qt.AlignVCenter,
                        datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d"))
@@ -408,9 +412,23 @@ class DayStrip(QWidget):
                                    QColor(GRID_OFF if off else GRID_ON))
                 p.restore()
         p.setPen(QColor("#777"))
+        ly = min(max(y + h for y, h in rows) + 4, self.height() - bottom + 4)
         for h in range(0, 24, 3):
-            p.drawText(QRectF(hx(h) - 15, top + rowh * n + 4, 30, 14), Qt.AlignCenter, f"{h:02d}")
+            p.drawText(QRectF(hx(h) - 15, ly, 30, 14), Qt.AlignCenter, f"{h:02d}")
         p.end()
+
+    def row_spans(self, n, top, even):
+        """(y, height) per row, newest first: level with the table's rows when it has them
+        (so a day reads straight across), else evenly spread."""
+        t = self.table
+        if t is not None and t.rowCount() == n:
+            spans = []
+            for r in range(n):
+                vr = t.visualRect(t.model().index(r, 0))
+                y = self.mapFromGlobal(t.viewport().mapToGlobal(vr.topLeft())).y()
+                spans.append((float(y), float(vr.height())))
+            return spans
+        return [(top + r * even, even) for r in range(n)]
 
 
 class DaysView:
@@ -444,6 +462,8 @@ class DaysView:
         self.table.setShowGrid(False)
         self.table.setMinimumHeight(160)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.strip.table = self.table               # the strip's rows sit level with these
+        self.table.verticalScrollBar().valueChanged.connect(self.strip.update)
         rlay.addWidget(self.table, 1)
         row.addWidget(left, 5)
         row.addWidget(right, 6)
@@ -451,7 +471,7 @@ class DaysView:
 
     def show(self, ds):
         """ds: readings.days() - oldest first; the strip puts the newest day on top."""
-        self.strip.set(ds)
+        self.strip.set(ds)                          # painted later, once the table is filled
         n = len(ds)
         self.table.setRowCount(n)
         for r, d in enumerate(reversed(ds)):            # newest first
