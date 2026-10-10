@@ -61,6 +61,8 @@ QHeaderView::section {{ background:{CARD}; color:{MUTED}; border:0; border-botto
                        padding:4px 2px; font-size:12px; }}
 QTableCornerButton::section {{ background:{CARD}; border:0; }}
 QGraphicsView {{ background:{CARD}; border:0; }}   /* plots: no light sliver at a fractional edge */
+#totalbox {{ border:1px solid #3c414b; border-radius:7px; background:transparent; }}
+QTableWidget::item {{ padding:0 3px; }}
 """
 
 
@@ -362,7 +364,8 @@ class DayStrip(QWidget):
         self.ds = []
         self.table = None                           # rows sit level with this table's rows
         self.setMinimumHeight(160)
-        self.setMinimumWidth(270)                   # labels + 24 cells still readable
+        self.setMinimumWidth(240)                   # labels + 24 narrow cells; the Days view
+                                                    # then fits a 1200 px portrait monitor at 1.25
 
     def set(self, ds):
         self.ds = ds
@@ -464,11 +467,32 @@ class DaysView:
         self.table.setMinimumHeight(160)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.strip.table = self.table               # the strip's rows sit level with these
+        # rounded grey frames over the Total row: the real totals, and apart the lows
+        self.total_groups, self.total_frames = [(1, 6), (7, 8)], []
+        for _ in self.total_groups:
+            f = QFrame(self.table.viewport())
+            f.setObjectName("totalbox")
+            f.setAttribute(Qt.WA_TransparentForMouseEvents)
+            f.hide()
+            self.total_frames.append(f)
+        self.table.horizontalHeader().sectionResized.connect(self.place_total_frames)
+        self.table.verticalScrollBar().valueChanged.connect(self.place_total_frames)
         self.table.verticalScrollBar().valueChanged.connect(self.strip.update)
         rlay.addWidget(self.table, 1)
         row.addWidget(left, 5)
         row.addWidget(right, 6)
         self.right = right
+
+    def place_total_frames(self, *_):
+        t = self.table
+        row = t.rowCount() - 1
+        for (c0, c1), f in zip(self.total_groups, self.total_frames):
+            if row < 0:
+                f.hide()
+                continue
+            r = t.visualRect(t.model().index(row, c0)).united(t.visualRect(t.model().index(row, c1)))
+            f.setGeometry(r.adjusted(2, 2, -1, -2))
+            f.show()
 
     def show(self, ds):
         """ds: readings.days() - oldest first; the strip puts the newest day on top."""
@@ -525,6 +549,7 @@ class DaysView:
         stretch = [w for c, w in enumerate(want) if c not in fit]      # Stretch splits evenly
         need = sum(want[c] for c in fit) + len(stretch) * max(stretch)
         self.right.setMinimumWidth(need + t.verticalScrollBar().sizeHint().width() + 2 * t.frameWidth() + 24)
+        QTimer.singleShot(0, self.place_total_frames)  # once the columns have their widths
 
 
 class Main(QMainWindow):
