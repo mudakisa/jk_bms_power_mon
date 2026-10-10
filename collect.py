@@ -16,11 +16,7 @@ from jkbms import (parse_cell_info, _cmd, CHAR, RESP_HEADER, FRAME_LEN,
                    CMD_CELL_INFO, CMD_DEVICE_INFO)
 from readings import paused, status_path
 
-try:
-    from config import DB, BANKS
-except ImportError:
-    raise SystemExit("PowerMon: no config.py found.\n"
-                     "    cp config.example.py config.py   # then edit it")
+from settings import DB, BANKS
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -230,7 +226,7 @@ async def main():
     ap.add_argument("--min-load-s", type=float, default=1.0, help="min seconds between stores under load")
     ap.add_argument("--idle-s", type=float, default=30.0, help="seconds between stores when idle")
     ap.add_argument("--bank", action="append", help="run only this bank (repeatable); default: all")
-    ap.add_argument("--db", default=DB, help="SQLite file (default: DB from config.py)")
+    ap.add_argument("--db", default=DB, help="SQLite file (default: db from config.json)")
     args = ap.parse_args()
     cfg = {"load_a": args.load_a, "min_load_s": args.min_load_s, "idle_s": args.idle_s}
     con = init_db(args.db)

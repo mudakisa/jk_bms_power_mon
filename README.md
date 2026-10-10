@@ -74,7 +74,7 @@ pip install -r requirements.txt
 Copy the config template and fill it in:
 
 ```bash
-cp config.example.py config.py
+cp config.example.json config.json
 ```
 
 Find your BMS address. Close the JK phone app first (the BMS allows only one BLE client),
@@ -87,18 +87,25 @@ python scan.py
 It lists nearby BLE devices, flags the likely JK-BMS, and prints a line ready to paste:
 
 ```
-    ("bank1", "AA:BB:CC:DD:EE:FF"),   # 314 A/h - PC
+    {"id": "bank1", "address": "AA:BB:CC:DD:EE:FF", "name": "314 A/h - PC"},
 ```
 
-Put that address (and a database path) into `config.py`:
+Put it into "banks" in `config.json`, one line per battery (as many as you have - see
+"Your batteries" below), and set the database path:
 
-```python
-DB = "powermon.db"
-BANKS = [("bank1", "AA:BB:CC:DD:EE:FF")]
+```json
+{
+  "db": "powermon.db",
+  "banks": [
+    {"id": "bank1", "address": "AA:BB:CC:DD:EE:FF", "name": "House"}
+  ]
+}
 ```
 
-An optional third field is the name shown on the bank's button in the dashboards:
-`("bank1", "AA:BB:CC:DD:EE:FF", "House")`. Without it the button shows `bank1`.
+"name" is what the dashboards put on the bank's button (optional - without it the button
+shows the id). A relative "db" path is taken from the project folder. That is all the
+setup: the collector finds each BMS by its address on the first start. (An older
+`config.py` from before the JSON config still works when there is no `config.json`.)
 
 Tip: an SSD makes a good home for the DB - the frequent small commits stay quiet and cause
 no mechanical wear. On some spinning HDDs the head clicks audibly on each commit (others are
@@ -196,12 +203,35 @@ Useful if you want to adapt or extend it.
 `scan.py`, `gatt.py`, `probe.py`, `capture.py`, and `test_stream.py` are the recon scripts
 this was worked out with - kept in the repo, handy if you port to another model.
 
-## A second bank
+## Your batteries
 
-Add it to `BANKS` in `config.py` and restart the collector. One adapter holds both links.
-What collides is the adapter's single discovery session, so the collector finds and
-connects banks one at a time, and reconnects to a bank BlueZ still remembers without
-scanning at all. Tested with two banks on one USB adapter, one of them at -83 dBm.
+Monitor as many JK-BMS batteries as you have - one line each in "banks" in `config.json`.
+No code to edit:
+
+1. Close the JK phone app (a BMS talks to one client at a time) and run `python scan.py`.
+2. Paste the line it prints for each battery into "banks"; give each a unique "id" and,
+   if you like, a "name" for its button.
+3. Restart the collector (`systemctl --user restart powermon.service`, or rerun
+   `python collect.py`) and the dashboards.
+
+```json
+{
+  "db": "powermon.db",
+  "banks": [
+    {"id": "house",  "address": "AA:BB:CC:DD:EE:FF", "name": "House"},
+    {"id": "garage", "address": "11:22:33:44:55:66", "name": "Garage"},
+    {"id": "boiler", "address": "22:33:44:55:66:77", "name": "Boiler"}
+  ]
+}
+```
+
+Each battery becomes a button in the dashboards' header, with its own charts, Days view,
+signal and Disconnect / Connect. All of them share one Bluetooth adapter: what collides
+there is the adapter's single discovery session, so the collector finds and connects
+the banks one at a time, and reconnects to a bank BlueZ still remembers without
+scanning at all. Tested with two banks on one USB adapter, one of them at -83 dBm; how
+many links an adapter holds at once depends on the adapter. A far battery on a weak
+signal drops and reconnects now and then - the charts show those holes dashed.
 
 Both dashboards show each link's Bluetooth signal (bars and dBm) next to the update time.
 Linux reads the signal of a live link only with extra rights, so grant them once:
@@ -226,7 +256,8 @@ readings.py     DB queries + time-left estimate, shared by the web and desktop d
 read.py         one-shot terminal read
 web/            built-in dashboard (stdlib server + Chart.js)
 app/            desktop app for Linux (PySide6 + pyqtgraph) and its menu launcher
-config.example.py   copy to config.py and edit
+config.example.json copy to config.json and edit
+settings.py     reads config.json for the collector and both dashboards
 systemd/        service units
 *.sh            start / stop / dashboard helpers
 scan/gatt/probe/capture/test_stream .py   protocol recon scripts

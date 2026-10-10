@@ -6,11 +6,7 @@ range, the latest reading, and the time-to-empty / time-to-full estimate.
 import json, os, sqlite3, time
 from datetime import datetime, timedelta
 
-try:
-    from config import DB, BANKS
-except ImportError:
-    raise SystemExit("PowerMon: no config.py in the project root.\n"
-                     "    cp config.example.py config.py   # then edit it")
+from settings import DB, BANKS
 
 # (id, label) per bank; the label is the optional 3rd field of a BANKS entry
 LABELS = [(b[0], b[2] if len(b) > 2 else b[0]) for b in BANKS]

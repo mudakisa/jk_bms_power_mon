@@ -2,7 +2,7 @@
 
 Close the JK BMS phone app first - the BMS allows only one BLE client. Then:
     python scan.py
-Copy the address of your BMS into config.py (the BANKS list).
+Copy the line of your BMS into "banks" in config.json.
 """
 import asyncio
 from bleak import BleakScanner
@@ -34,9 +34,9 @@ async def main():
             candidates.append((addr, name))
 
     if candidates:
-        print("\nLikely JK-BMS found. Paste into config.py (BANKS):")
+        print('\nLikely JK-BMS found. Paste into "banks" in config.json:')
         for i, (addr, name) in enumerate(candidates, 1):
-            print(f'    ("bank{i}", "{addr}"),   # {name}')
+            print(f'    {{"id": "bank{i}", "address": "{addr}", "name": "{name}"}},')
     else:
         print("\nNo obvious JK-BMS in range. Check the phone app is closed and the BMS is awake.")
 

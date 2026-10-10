@@ -11,7 +11,7 @@ import os, sys, time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))      # readings.py / config.py in the project root
+sys.path.insert(0, os.path.dirname(HERE))      # readings.py / config.json in the project root
 from readings import query, latest, days, banks, latest_soc, paused, set_paused, LABELS
 
 import numpy as np
@@ -517,7 +517,7 @@ class Main(QMainWindow):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(16)
         h.addWidget(label('<span style="font-size:16px; font-weight:600">PowerMon</span>'))
-        # bank buttons (labels from config.py) and the connect / disconnect of the selected one
+        # bank buttons (names from config.json) and the connect / disconnect of the selected one
         bseg = QFrame()
         bseg.setObjectName("seg")
         bl = QHBoxLayout(bseg)

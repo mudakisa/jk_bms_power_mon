@@ -1,7 +1,7 @@
 import asyncio, sys
 from bleak import BleakClient
 
-ADDR = sys.argv[1] if len(sys.argv) > 1 else __import__("config").BANKS[0][1]
+ADDR = sys.argv[1] if len(sys.argv) > 1 else __import__("settings").BANKS[0][1]
 CHAR = "0000ffe1-0000-1000-8000-00805f9b34fb"
 
 DEV_INFO = {

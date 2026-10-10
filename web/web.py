@@ -6,7 +6,7 @@ whichever you like.
 """
 import http.server, socketserver, json, os, sys, urllib.parse
 
-# readings.py and config.py live in the project root (one level up from web/)
+# readings.py and config.json live in the project root (one level up from web/)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from readings import query, banks, set_paused, LABELS
 

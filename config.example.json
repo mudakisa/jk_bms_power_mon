@@ -1,0 +1,6 @@
+{
+  "db": "powermon.db",
+  "banks": [
+    {"id": "bank1", "address": "AA:BB:CC:DD:EE:FF", "name": "House"}
+  ]
+}

@@ -3,7 +3,8 @@ __pycache__/
 *.pyc
 .venv/
 
-# Local config (copy config.example.py -> config.py and fill it in)
+# Local config (copy config.example.json -> config.json and fill it in; config.py is the old form)
+config.json
 config.py
 
 # Personal / agent-internal working files (kept local, not for the public repo)

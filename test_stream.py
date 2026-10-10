@@ -2,7 +2,7 @@ import asyncio, time
 from bleak import BleakClient
 from jkbms import _cmd, CHAR, RESP_HEADER, FRAME_LEN, CMD_CELL_INFO, CMD_DEVICE_INFO
 
-ADDR = __import__("config").BANKS[0][1]
+ADDR = __import__("settings").BANKS[0][1]
 
 async def main():
     buf = bytearray()

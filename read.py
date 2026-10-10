@@ -1,11 +1,7 @@
 import asyncio
 from jkbms import read_cell_info
 
-try:
-    from config import BANKS
-except ImportError:
-    raise SystemExit("PowerMon: no config.py found.\n"
-                     "    cp config.example.py config.py   # then edit it")
+from settings import BANKS
 
 def fmt(name, d):
     cells = " ".join(f"{v:.3f}" for v in d["cells_v"])
