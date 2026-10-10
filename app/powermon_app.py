@@ -453,6 +453,7 @@ class DaysView:
                 item.setToolTip(tip)
             self.table.setHorizontalHeaderItem(i, item)
         self.table.verticalHeader().hide()
+        self.table.verticalHeader().setMinimumSectionSize(1)   # lets the gap row be thin
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         for c in (0, 4):                            # Day and Outages: as wide as their text
             self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
@@ -473,7 +474,8 @@ class DaysView:
         """ds: readings.days() - oldest first; the strip puts the newest day on top."""
         self.strip.set(ds)                          # painted later, once the table is filled
         n = len(ds)
-        self.table.setRowCount(n + 1)               # + the totals row
+        self.table.setRowCount(n + 2)               # + a small gap and the totals row
+        self.table.setRowHeight(n, 8)
         for r, d in enumerate(reversed(ds)):            # newest first
             known = d["on_s"] + d["off_s"] > 0
             cells = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d.%m"),
@@ -506,19 +508,15 @@ class DaysView:
                f"{sum(d['used_wh'] for d in ds) / 1000:.2f}",
                f"{sum(d['charged_wh'] for d in ds) / 1000:.2f}",
                f"{min(socs)} %" if socs else "—", f"{min(cmins):.3f} V" if cmins else "—"]
-        bold = QFont()
-        bold.setBold(True)
-        for c, text in enumerate(tot):
+        for c, text in enumerate(tot):              # quiet: grey, set off by the gap row
             item = QTableWidgetItem(text)
             item.setTextAlignment(Qt.AlignVCenter | (Qt.AlignLeft if c == 0 else Qt.AlignRight))
-            item.setFont(bold)
-            item.setBackground(QColor("#1f2228"))
-            if c == 1 and sum(d["off_s"] for d in ds) > 0:
-                item.setForeground(QColor(GRID_OFF))
+            item.setForeground(QColor(GRID_OFF if c == 1 and sum(d["off_s"] for d in ds) > 0
+                                      else MUTED))
             if c == 0:
                 item.setToolTip(f"Over the {n} days: sums; SoC and cell - the lowest; an outage "
                                 "going on past midnight counts once here")
-            self.table.setItem(n, c, item)
+            self.table.setItem(n + 1, c, item)
         # the table never gets narrower than its columns need (a room is kept for the
         # vertical scrollbar): when the window narrows, the strip gives way first
         t, hdr = self.table, self.table.horizontalHeader()
