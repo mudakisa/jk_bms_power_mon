@@ -141,6 +141,7 @@ function ds(label, color, fill){
   return { label, data:[], borderColor:color, backgroundColor:color+"22",
            borderWidth:2, pointRadius:0, tension:0.15, fill:!!fill, spanGaps:true,
            segment:{ borderDash: ctx => hole(ctx, [5, 5]), borderWidth: ctx => hole(ctx, 1.5),
+                     borderColor: ctx => hole(ctx, color + "4d"),           // 30 % opacity
                      backgroundColor: ctx => hole(ctx, "transparent") } };
 }
 function mkChart(id, datasets, ycfg){

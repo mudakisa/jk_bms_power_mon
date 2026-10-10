@@ -113,7 +113,7 @@ def bridge(t, y, breaks):
 
 
 def dashed(color, width):
-    return pg.mkPen(color + "aa", width=width, style=Qt.DashLine)
+    return pg.mkPen(color + "4d", width=width, style=Qt.DashLine)     # 30 % opacity
 
 
 def battery_icon(soc, color):
