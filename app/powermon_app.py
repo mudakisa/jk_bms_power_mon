@@ -511,7 +511,8 @@ class DaysView:
             known = d["on_s"] + d["off_s"] > 0
             cells = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d.%m"),
                      hm(d["off_s"]) if known else "—", hm(d["on_s"]) if known else "—",
-                     hm(d["unknown_s"]), str(d["outages"]) if known else "—",
+                     hm(d["unknown_s"]) if known else "—",       # nothing at all: not watched
+                     str(d["outages"]) if known else "—",
                      f"{d['used_wh'] / 1000:.2f}" if known else "—",
                      f"{d['charged_wh'] / 1000:.2f}" if known else "—",
                      f"{d['soc_min']} %" if d["soc_min"] is not None else "—",
@@ -535,7 +536,7 @@ class DaysView:
         socs = [d["soc_min"] for d in ds if d["soc_min"] is not None]
         cmins = [d["cell_min"] for d in ds if d["cell_min"] is not None]
         tot = ["Total", hm(sum(d["off_s"] for d in ds)), hm(sum(d["on_s"] for d in ds)),
-               hm(sum(d["unknown_s"] for d in ds)), str(outages),
+               hm(sum(d["unknown_s"] for d in ds if d["on_s"] + d["off_s"] > 0)), str(outages),
                f"{sum(d['used_wh'] for d in ds) / 1000:.2f}",
                f"{sum(d['charged_wh'] for d in ds) / 1000:.2f}",
                f"{min(socs)} %" if socs else "—", f"{min(cmins):.3f} V" if cmins else "—"]
