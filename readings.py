@@ -21,6 +21,8 @@ ETA_WINDOW_S = 300   # "current load" = time-weighted mean current over this win
 IDLE_A = 0.5         # |mean current| below this is idle, no ETA (the collector's --load-a)
 GAP_S = 60           # one sample stands for at most this long (a longer gap = no data)
 STALE_S = 120        # no ETA when the newest reading is older than this
+BREAK_S = 90         # readings further apart = no data between (PC asleep, link down):
+                     # the charts break the line there instead of bridging the hole
 
 
 def control_path(db=DB):
@@ -167,6 +169,14 @@ def query(minutes, bank):
     rows = con.execute(
         f"SELECT ts,{','.join(COLS)},cells_json FROM readings WHERE bank=? AND ts>=? ORDER BY ts",
         (bank, cutoff)).fetchall()
+    # an empty point in each hole: a straight line across it was drawn before, and a
+    # downsampling bin that took both edges of the hole drew a vertical spike
+    pts = []
+    for i, r in enumerate(rows):
+        if i and r[0] - rows[i - 1][0] > BREAK_S:
+            pts.append((rows[i - 1][0] + 1,) + (None,) * (len(r) - 1))
+        pts.append(r)
+    rows = pts
     out = {"t": [int(r[0] * 1000) for r in rows]}
     for i, c in enumerate(COLS):
         out[c] = [r[i + 1] for r in rows]
