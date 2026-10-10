@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QG
                                QHBoxLayout, QLabel, QMainWindow, QMenu, QProgressBar,
                                QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget)
 
-RANGES = [("30m", 30), ("1h", 60), ("3h", 180), ("6h", 360), ("24h", 1440), ("2d", 2880),
-          ("7d", 10080)]
+RANGES = [("30m", 30), ("1h", 60), ("3h", 180), ("6h", 360), ("12h", 720), ("24h", 1440),
+          ("2d", 2880), ("7d", 10080)]
 CARDS_MS, CHARTS_MS = 1000, 30_000     # cards: the newest row, live; charts: the whole range
 
 BG, CARD, LINE, TXT, MUTED = "#0e0f12", "#16181d", "#23262d", "#e6e6e6", "#8a8f98"
