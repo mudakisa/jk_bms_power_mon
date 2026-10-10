@@ -169,15 +169,16 @@ def query(minutes, bank):
     rows = con.execute(
         f"SELECT ts,{','.join(COLS)},cells_json FROM readings WHERE bank=? AND ts>=? ORDER BY ts",
         (bank, cutoff)).fetchall()
-    # an empty point in each hole: a straight line across it was drawn before, and a
-    # downsampling bin that took both edges of the hole drew a vertical spike
-    pts = []
+    # an empty point in each hole: the solid line breaks there (a downsampling bin that
+    # took both edges of a hole drew a vertical spike), the dashboards bridge it dashed
+    pts, breaks = [], []
     for i, r in enumerate(rows):
         if i and r[0] - rows[i - 1][0] > BREAK_S:
+            breaks.append(len(pts))
             pts.append((rows[i - 1][0] + 1,) + (None,) * (len(r) - 1))
         pts.append(r)
     rows = pts
-    out = {"t": [int(r[0] * 1000) for r in rows]}
+    out = {"t": [int(r[0] * 1000) for r in rows], "breaks": breaks}
     for i, c in enumerate(COLS):
         out[c] = [r[i + 1] for r in rows]
     out["power_w"] = [_signed_power(p, a) for p, a in zip(out["power_w"], out["current_a"])]

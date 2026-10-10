@@ -135,9 +135,13 @@ function fmtTime(ms){
   return state.minutes > 1440
     ? d.toLocaleDateString([], {month:"2-digit", day:"2-digit"}) + " " + hm : hm;
 }
+// holes in the data (empty points from the server) are bridged by a dashed, unfilled line
+const hole = (ctx, v) => ctx.p0.skip || ctx.p1.skip ? v : undefined;
 function ds(label, color, fill){
   return { label, data:[], borderColor:color, backgroundColor:color+"22",
-           borderWidth:2, pointRadius:0, tension:0.15, fill:!!fill };
+           borderWidth:2, pointRadius:0, tension:0.15, fill:!!fill, spanGaps:true,
+           segment:{ borderDash: ctx => hole(ctx, [5, 5]), borderWidth: ctx => hole(ctx, 1.5),
+                     backgroundColor: ctx => hole(ctx, "transparent") } };
 }
 function mkChart(id, datasets, ycfg){
   return new Chart(document.getElementById(id), {

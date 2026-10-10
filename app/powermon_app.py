@@ -101,6 +101,21 @@ def tray_level(soc):
     return next((color, square) for limit, color, square in TRAY_LEVELS if soc < limit)
 
 
+def bridge(t, y, breaks):
+    """Pairs of points over the holes (last reading before -> first after), for a dashed
+    line with connect="pairs"; the solid line itself breaks there."""
+    bx, by = [], []
+    for i in breaks:
+        if 0 < i < len(t) - 1 and np.isfinite(y[i - 1]) and np.isfinite(y[i + 1]):
+            bx += [t[i - 1], t[i + 1]]
+            by += [y[i - 1], y[i + 1]]
+    return np.array(bx, dtype=float), np.array(by, dtype=float)
+
+
+def dashed(color, width):
+    return pg.mkPen(color + "aa", width=width, style=Qt.DashLine)
+
+
 def battery_icon(soc, color):
     """A small battery filled to `soc` in `color`, for the tray menu."""
     pm = QPixmap(32, 32)
@@ -207,7 +222,7 @@ class Chart:
         pi.showGrid(x=True, y=True, alpha=1.0)
         if yrange:
             pi.setYRange(*yrange, padding=0.02)
-        self.curves = []
+        self.curves, self.bridges = [], []
         for _, color in series:
             kw = dict(fillLevel=0, brush=pg.mkBrush(color + "22")) if fill else {}
             pen = pg.mkPen(color, width=2)
@@ -215,6 +230,7 @@ class Chart:
             # autoDownsampleFactor 1: "peak" keeps ~2 points per pixel (default 5 -> ~10)
             self.curves.append(pi.plot([], [], pen=pen, connect="finite",
                                        autoDownsampleFactor=1.0, **kw))
+            self.bridges.append(pi.plot([], [], pen=dashed(color, 1.5), connect="pairs"))
         self.vline = pg.InfiniteLine(angle=90, pen=pg.mkPen("#555", width=1))
         self.tip = pg.TextItem(fill=pg.mkBrush("#1d2128e6"), border=pg.mkPen(LINE))
         for item in (self.vline, self.tip):
@@ -223,10 +239,11 @@ class Chart:
         self.plot.scene().sigMouseMoved.connect(self.hover)
         self.plot.on_leave = self.unhover
 
-    def set(self, t, ys):
+    def set(self, t, ys, breaks=()):
         self.t, self.ys = t, ys
-        for curve, y in zip(self.curves, ys):
+        for curve, dash, y in zip(self.curves, self.bridges, ys):
             curve.setData(t, y)
+            dash.setData(*bridge(t, y, breaks))
         top = max((np.nanmax(y) for y in ys if np.isfinite(y).any()), default=None)
         if self.ymin is not None and top is not None:
             self.pi.setYRange(self.ymin, max(top, self.ymin + 1), padding=0.05)
@@ -292,12 +309,14 @@ class Spark:
         pi.setDownsampling(auto=True, mode="peak")
         self.curves = [pi.plot([], [], pen=pg.mkPen(c, width=1.5), connect="finite",
                                autoDownsampleFactor=1.0) for c in colors]
+        self.bridges = [pi.plot([], [], pen=dashed(c, 1), connect="pairs") for c in colors]
         row.addWidget(self.plot, 1)
         lay.addLayout(row, 1)
 
-    def set(self, t, ys):
-        for curve, y in zip(self.curves, ys):
+    def set(self, t, ys, breaks=()):
+        for curve, dash, y in zip(self.curves, self.bridges, ys):
             curve.setData(t, y)
+            dash.setData(*bridge(t, y, breaks))
         if len(t):
             self.pi.setXRange(t[0], t[-1], padding=0)
         vals = np.concatenate(ys) if ys else np.array([])
@@ -688,19 +707,20 @@ class Main(QMainWindow):
             return                              # load_cards reports read errors
         t = np.array(d["t"], dtype=float) / 1000
         arr = lambda k: np.array(d[k], dtype=float)
-        self.ch["v"].set(t, [arr("pack_v")])
-        self.ch["a"].set(t, [arr("current_a")])
-        self.ch["soc"].set(t, [arr("soc_pct")])
-        self.ch["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")])
-        self.ch["cells"].set(t, [arr("cell_min_v"), arr("cell_avg_v"), arr("cell_max_v")])
-        self.ch["d"].set(t, [arr("delta_mv")])
-        self.mini["soc"].set(t, [arr("soc_pct")])
-        self.mini["a"].set(t, [arr("current_a")])
-        self.mini["v"].set(t, [arr("pack_v")])
+        br = d["breaks"]                            # holes in the data: bridged dashed
+        self.ch["v"].set(t, [arr("pack_v")], br)
+        self.ch["a"].set(t, [arr("current_a")], br)
+        self.ch["soc"].set(t, [arr("soc_pct")], br)
+        self.ch["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")], br)
+        self.ch["cells"].set(t, [arr("cell_min_v"), arr("cell_avg_v"), arr("cell_max_v")], br)
+        self.ch["d"].set(t, [arr("delta_mv")], br)
+        self.mini["soc"].set(t, [arr("soc_pct")], br)
+        self.mini["a"].set(t, [arr("current_a")], br)
+        self.mini["v"].set(t, [arr("pack_v")], br)
         cmin = arr("cell_min_v")                    # the lowest cell decides the BMS cutoff
         self.mini["v"].note.setText(f'<span style="color:{C["cmin"]}">{np.nanmin(cmin):.3f} V</span>'
                                     if np.isfinite(cmin).any() else "")
-        self.mini["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")])
+        self.mini["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")], br)
 
 
 INSTANCE = f"powermon-app-{os.getuid()}"
