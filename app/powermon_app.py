@@ -16,8 +16,8 @@ from readings import query, latest, days, banks, latest_soc, paused, set_paused,
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QComboBox,
                                QFrame, QGridLayout, QHeaderView, QTableWidget, QTableWidgetItem,
@@ -342,9 +342,8 @@ def hm(seconds):
     return f"{int(seconds // 3600)}:{int(seconds % 3600 // 60):02d}"
 
 
-# grid on is the normal state - a muted green (pre-mixed with the card: Qt reads #rrggbbaa as
-# #aarrggbb); grid off is what the view is for; no data is hatched
-GRID_ON, GRID_OFF, NO_DATA = "#235238", "#d65f59", "#4a505c"
+# the Days strip: grid on, grid off, and no data (a dark track with grey hatching)
+GRID_ON, GRID_OFF, NO_DATA, HATCH = "#2f8f5b", "#ef6461", "#1e2127", "#4a505c"
 DAY_COLS = [("Day", None), ("Off", "Grid off: the battery was discharging (the inverter ran the "
             "load from it)"), ("On", "Grid on: the battery was charging or idle"),
             ("No data", "PC asleep or link down - counted neither way"),
@@ -352,6 +351,57 @@ DAY_COLS = [("Day", None), ("Off", "Grid off: the battery was discharging (the i
              "surge); one going on past midnight counts in both days"),
             ("kWh out", "Energy taken from the battery while the grid was off"),
             ("kWh in", "Energy put into the battery"), ("SoC min", None), ("Cell min", None)]
+
+
+class DayStrip(QWidget):
+    """Uptime-style strips, newest day on top: a rounded track per day, hatched where
+    there is no data, with grid-on / grid-off pieces over it; faint hour guides behind."""
+    def __init__(self):
+        super().__init__()
+        self.ds = []
+        self.setMinimumHeight(160)
+
+    def set(self, ds):
+        self.ds = ds
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(CARD))
+        if not self.ds:
+            return
+        f = QFont()
+        f.setPixelSize(11)
+        p.setFont(f)
+        left, top, bottom = 58, 4, 20
+        n, w = len(self.ds), self.width() - 58 - 6
+        rowh = (self.height() - top - bottom) / n
+        hx = lambda h: left + w * h / 24
+        for h in range(25):                     # hour guides, stronger every 3 h
+            p.setPen(QColor("#353a44" if h % 3 == 0 else "#24272e"))
+            p.drawLine(round(hx(h)), top, round(hx(h)), round(top + rowh * n))
+        now = (time.time() - datetime.now().replace(hour=0, minute=0, second=0).timestamp()) / 3600
+        th = min(12.0, rowh * 0.45)
+        for r, d in enumerate(reversed(self.ds)):
+            y = top + r * rowh
+            p.setPen(QColor(TXT if r == 0 else MUTED))
+            p.drawText(QRectF(0, y, left - 10, rowh), Qt.AlignRight | Qt.AlignVCenter,
+                       datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d"))
+            ty, end = y + (rowh - th) / 2, now if r == 0 else 24     # today: until now
+            track = QPainterPath()
+            track.addRoundedRect(QRectF(hx(0), ty, hx(end) - hx(0), th), th / 2, th / 2)
+            p.fillPath(track, QColor(NO_DATA))
+            p.fillPath(track, QBrush(QColor(HATCH), Qt.BDiagPattern))
+            p.setPen(Qt.NoPen)
+            for a, b, off in d["segs"]:
+                sw = max(hx(b) - hx(a), 1.5)
+                p.setBrush(QColor(GRID_OFF if off else GRID_ON))
+                p.drawRoundedRect(QRectF(hx(a), ty, sw, th), min(th, sw) / 2, min(th, sw) / 2)
+        p.setPen(QColor("#777"))
+        for h in range(0, 24, 3):
+            p.drawText(QRectF(hx(h) - 15, top + rowh * n + 4, 30, 14), Qt.AlignCenter, f"{h:02d}")
+        p.end()
 
 
 class DaysView:
@@ -364,29 +414,10 @@ class DaysView:
         row.setSpacing(12)
         left, lay = card((12, 10, 12, 10), 6)
         legend = "&nbsp;&nbsp;".join(f'<span style="color:{c}">●</span> <span style="color:#9aa0aa">{n}</span>'
-                                     for n, c in (("on", "#3bbf6b"), ("off", GRID_OFF), ("no data", NO_DATA)))
+                                     for n, c in (("on", GRID_ON), ("off", GRID_OFF), ("no data", HATCH)))
         lay.addWidget(label(f"Grid by day&nbsp;&nbsp;&nbsp;{legend}", "h2"))
-        self.plot = pg.PlotWidget(background=CARD)
-        self.plot.setMinimumHeight(160)
-        pi = self.pi = self.plot.getPlotItem()
-        pi.setMouseEnabled(False, False)
-        pi.setMenuEnabled(False)
-        pi.hideButtons()
-        tick = QFont()
-        tick.setPointSize(8)
-        for ax in ("left", "bottom"):
-            a = pi.getAxis(ax)
-            a.setPen(GRID)
-            a.setTextPen("#777")
-            a.setStyle(tickFont=tick, tickLength=0)
-        pi.getAxis("bottom").setTicks([[(h, f"{h:02d}") for h in range(0, 24, 3)]])
-        for h in range(1, 24):                  # hour cells: a cut in the card colour, wider every 3 h
-            cut = pg.InfiniteLine(pos=h, angle=90, pen=pg.mkPen(CARD, width=2 if h % 3 == 0 else 1))
-            cut.setZValue(10)
-            pi.addItem(cut)
-        pi.setXRange(0, 24, padding=0.01)
-        lay.addWidget(self.plot, 1)
-        self.bars = []
+        self.strip = DayStrip()
+        lay.addWidget(self.strip, 1)
         right, rlay = card((12, 10, 12, 10), 6)
         self.table = QTableWidget(0, len(DAY_COLS))
         for i, (name, tip) in enumerate(DAY_COLS):
@@ -408,33 +439,8 @@ class DaysView:
 
     def show(self, ds):
         """ds: readings.days() - oldest first; the strip puts the newest day on top."""
-        for b in self.bars:
-            self.pi.removeItem(b)
+        self.strip.set(ds)
         n = len(ds)
-        x0 = {GRID_ON: [], GRID_OFF: []}
-        x1, y = {GRID_ON: [], GRID_OFF: []}, {GRID_ON: [], GRID_OFF: []}
-        for i, d in enumerate(ds):
-            for a, b, off in d["segs"]:
-                c = GRID_OFF if off else GRID_ON
-                x0[c].append(a)
-                x1[c].append(b)
-                y[c].append(i)
-        today = (time.time() - datetime.now().replace(hour=0, minute=0, second=0).timestamp()) / 3600
-        h = 0.3                                     # half a strip: gaps between the days
-        self.bars = [pg.BarGraphItem(x0=[0] * n, x1=[24] * (n - 1) + [today],   # today: until now
-                                     y0=[i - h for i in range(n)], y1=[i + h for i in range(n)],
-                                     brush=QBrush(QColor(NO_DATA), Qt.BDiagPattern),
-                                     pen=pg.mkPen(None))]                 # None = default outline
-        for c in (GRID_ON, GRID_OFF):
-            if x0[c]:
-                self.bars.append(pg.BarGraphItem(x0=x0[c], x1=x1[c], y0=[v - h for v in y[c]],
-                                                 y1=[v + h for v in y[c]], brush=c,
-                                                 pen=pg.mkPen(None)))
-        for b in self.bars:
-            self.pi.addItem(b)
-        self.pi.getAxis("left").setTicks([[(i, datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d"))
-                                           for i, d in enumerate(ds)]])
-        self.pi.setYRange(-0.6, n - 0.4, padding=0)
         self.table.setRowCount(n)
         for r, d in enumerate(reversed(ds)):            # newest first
             known = d["on_s"] + d["off_s"] > 0
