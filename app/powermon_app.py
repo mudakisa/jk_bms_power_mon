@@ -16,7 +16,7 @@ from readings import query, latest, days, banks, latest_soc, paused, set_paused,
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QComboBox,
@@ -355,6 +355,9 @@ DAY_COLS = [("Day", None), ("Off", "Grid off: the battery was discharging (the i
             ("kWh\nin", "Energy put into the battery"), ("SoC\nmin", None), ("Cell\nmin", None)]
 
 
+STRIP_W = 375        # the strip card's width (user); narrower only when the table needs it
+
+
 class DayStrip(QWidget):
     """Newest day on top; per day 24 rounded hour cells, inside each the grid on / off
     pieces exact to the minute, grey-hatched where there is no data. Today's cells stop
@@ -370,6 +373,9 @@ class DayStrip(QWidget):
     def set(self, ds):
         self.ds = ds
         self.update()
+
+    def sizeHint(self):
+        return QSize(STRIP_W - 24, 300)             # the card's width minus its padding
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -479,8 +485,9 @@ class DaysView:
         self.table.verticalScrollBar().valueChanged.connect(self.place_total_frames)
         self.table.verticalScrollBar().valueChanged.connect(self.strip.update)
         rlay.addWidget(self.table, 1)
-        row.addWidget(left, 5)
-        row.addWidget(right, 6)
+        left.setMaximumWidth(STRIP_W)               # a set width; the table takes the rest and,
+        row.addWidget(left, 0)                      # on a narrow window, shrinks to its need first
+        row.addWidget(right, 1)
         self.right = right
 
     def place_total_frames(self, *_):
@@ -491,7 +498,7 @@ class DaysView:
                 f.hide()
                 continue
             r = t.visualRect(t.model().index(row, c0)).united(t.visualRect(t.model().index(row, c1)))
-            f.setGeometry(r.adjusted(2, 2, -1, -2))
+            f.setGeometry(r.adjusted(2, 1, -1, -3))     # 1 up: even room above and below the figures
             f.show()
 
     def show(self, ds):
