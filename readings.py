@@ -118,7 +118,7 @@ def eta(con, bank, now):
 
 
 DAYS = 14            # the "Days" view covers the last 14 local days
-MIN_OUTAGE_S = 60    # a shorter discharge is a load surge over the charger, not an outage
+MIN_OUTAGE_S = 60    # a shorter discharge between grid-on readings is a load surge, not an outage
 
 
 _DAYS_CACHE = {}     # bank -> (first date, finished days): those no longer change
@@ -185,10 +185,15 @@ def _days(bank, first, n):
             t0, k = t1, k + 1 if t1 == starts[k + 1] else k
             if k >= n:
                 break
-    for d in out:                               # short discharges count as grid on
-        merged = []
-        for a, b, off in d["segs"]:
-            if off and (b - a) * 3600 < MIN_OUTAGE_S:
+    for d in out:
+        # a short discharge counts as grid on only when grid-on readings hold it on both
+        # sides with no hole - a load surge over the charger. Next to a hole (a weak link
+        # cuts an outage into bits) or to more grid-off it stays part of the outage.
+        segs, merged = d["segs"], []
+        for i, (a, b, off) in enumerate(segs):
+            on_before = i > 0 and not segs[i - 1][2] and abs(segs[i - 1][1] - a) < 1e-6
+            on_after = i + 1 < len(segs) and not segs[i + 1][2] and abs(segs[i + 1][0] - b) < 1e-6
+            if off and (b - a) * 3600 < MIN_OUTAGE_S and on_before and on_after:
                 d["off_s"] = max(0.0, d["off_s"] - (b - a) * 3600)   # float sums: no -0:00
                 d["on_s"] += (b - a) * 3600
                 off = False

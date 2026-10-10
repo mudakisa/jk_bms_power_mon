@@ -16,7 +16,7 @@ from readings import query, latest, days, banks, latest_soc, paused, set_paused,
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QComboBox,
@@ -454,7 +454,7 @@ class DaysView:
         lay.addWidget(label(f"Grid by day&nbsp;&nbsp;&nbsp;{legend}", "h2"))
         self.strip = DayStrip()
         lay.addWidget(self.strip, 1)
-        right, rlay = card((12, 10, 12, 10), 6)
+        right, rlay = card((12, 10, 24, 10), 6)     # wider right margin: room for the Total frame
         self.table = QTableWidget(0, len(DAY_COLS))
         for i, (name, tip) in enumerate(DAY_COLS):
             item = QTableWidgetItem(name)
@@ -476,7 +476,7 @@ class DaysView:
         # rounded grey frames over the Total row: the real totals, and apart the lows
         self.total_groups, self.total_frames = [(1, 6), (7, 8)], []
         for _ in self.total_groups:
-            f = QFrame(self.table.viewport())
+            f = QFrame(right)                       # the card: a frame may reach into its margin
             f.setObjectName("totalbox")
             f.setAttribute(Qt.WA_TransparentForMouseEvents)
             f.hide()
@@ -494,24 +494,61 @@ class DaysView:
         self.right = right
 
     def place_total_frames(self, *_):
-        """Frame the Total row's groups. Figures are right-aligned, so two groups meet in
-        the middle of the gap between this row's figures, not at the column edge."""
-        t = self.table
-        row = t.rowCount() - 1
-        if row < 0:
+        """Frame the Total row's groups: two groups meet in the middle of the gap between
+        their figures; inside every frame the same room left and right of the figures
+        and above and below them. The figures' edges are read from the row as drawn
+        (font metrics were a couple of pixels off with the system font)."""
+        t, card, row = self.table, self.right, self.table.rowCount() - 1
+        r = t.visualRect(t.model().index(max(row, 0), 0))
+        if row < 0 or r.bottom() < 0 or r.top() > t.viewport().height():
             for f in self.total_frames:
                 f.hide()
             return
-        fm, pad = t.fontMetrics(), 6                # item padding (3) + the style's margin
-        cell = lambda c: t.visualRect(t.model().index(row, c))
-        ink_right = lambda c: cell(c).right() - pad
-        ink_left = lambda c: ink_right(c) - fm.horizontalAdvance(t.item(row, c).text())
+        band = QRect(0, r.top(), t.viewport().width(), r.height())
+        img = t.viewport().grab(band).toImage()
+        dpr = img.devicePixelRatio()
+        lit = lambda x, y: img.pixelColor(x, y).lightness() > 90
+
+        def ink(c):                                 # (left, right, top, bottom) in the viewport
+            cr = t.visualRect(t.model().index(row, c))
+            xs, ys = [], []
+            for x in range(round(cr.left() * dpr), round((cr.right() + 1) * dpr)):
+                for y in range(img.height()):
+                    if lit(x, y):
+                        xs.append(x)
+                        ys.append(y)
+            if not xs:
+                return cr.left(), cr.right(), r.top() + r.height() / 2, r.top() + r.height() / 2
+            return min(xs) / dpr, (max(xs) + 1) / dpr, r.top() + min(ys) / dpr, r.top() + (max(ys) + 1) / dpr
+
         groups = self.total_groups
+        boxes = {c: ink(c) for g in groups for c in range(g[0], g[1] + 1)}
+        top = min(b[2] for b in boxes.values())
+        bottom = max(b[3] for b in boxes.values())
+        # widget edges sit on whole units, but at a fractional scale (1.25) they land on
+        # device pixels unevenly: pick the y / height whose drawn edges leave the most
+        # even room above and below the figures
+        oy = t.viewport().mapTo(self.widget.window(), QPoint(0, 0)).y()
+
+        def uneven(y, hh):                          # aim: a pixel more room below (user) -
+            above = (oy + top) * dpr - round((oy + y) * dpr)        # figures have no
+            below = round((oy + y + hh) * dpr) - (oy + bottom) * dpr  # descenders
+            return abs(below - above - 1)
+        c, h0 = (top + bottom) / 2, r.height() - 4
+        y0, h = min(((y, hh) for hh in (h0 - 1, h0, h0 + 1)
+                     for y in (int(c - hh / 2) - 1, int(c - hh / 2), int(c - hh / 2) + 1)),
+                    key=lambda yh: (uneven(*yh), abs(yh[1] - h0)))
+        mids = [(boxes[groups[g][1]][1] + boxes[groups[g + 1][0]][0]) / 2 for g in range(len(groups) - 1)]
         for g, ((c0, c1), f) in enumerate(zip(groups, self.total_frames)):
-            x0 = cell(c0).left() + 2 if g == 0 else (ink_right(groups[g - 1][1]) + ink_left(c0)) // 2 + 2
-            x1 = cell(c1).right() - 1 if g == len(groups) - 1 else (ink_right(c1) + ink_left(groups[g + 1][0])) // 2 - 2
-            r = cell(c0)
-            f.setGeometry(x0, r.top() + 1, x1 - x0, r.height() - 4)   # even room above / below
+            left = mids[g - 1] + 2 if g > 0 else None
+            right = mids[g] - 2 if g < len(mids) else None
+            room = right - boxes[c1][1] if right is not None else boxes[c0][0] - left
+            left = boxes[c0][0] - room if left is None else left
+            right = boxes[c1][1] + room if right is None else right
+            p0 = t.viewport().mapTo(card, QPoint(round(left), round(y0)))
+            p1 = t.viewport().mapTo(card, QPoint(round(right), round(y0 + h)))
+            f.setGeometry(p0.x(), p0.y(), min(p1.x(), card.width() - 3) - p0.x(), p1.y() - p0.y())
+            f.raise_()
             f.show()
 
     def show(self, ds):
@@ -569,7 +606,7 @@ class DaysView:
         fit = [c for c in range(t.columnCount()) if hdr.sectionResizeMode(c) == QHeaderView.ResizeToContents]
         stretch = [w for c, w in enumerate(want) if c not in fit]      # Stretch splits evenly
         need = sum(want[c] for c in fit) + len(stretch) * max(stretch)
-        self.right.setMinimumWidth(need + t.verticalScrollBar().sizeHint().width() + 2 * t.frameWidth() + 24)
+        self.right.setMinimumWidth(need + t.verticalScrollBar().sizeHint().width() + 2 * t.frameWidth() + 36)
         self.place_soon.start()                     # once the columns have their widths
 
 
