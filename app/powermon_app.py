@@ -421,7 +421,7 @@ class DayStrip(QWidget):
         """(y, height) per row, newest first: level with the table's rows when it has them
         (so a day reads straight across), else evenly spread."""
         t = self.table
-        if t is not None and t.rowCount() == n:
+        if t is not None and t.rowCount() >= n:      # (the table adds a totals row)
             spans = []
             for r in range(n):
                 vr = t.visualRect(t.model().index(r, 0))
@@ -473,7 +473,7 @@ class DaysView:
         """ds: readings.days() - oldest first; the strip puts the newest day on top."""
         self.strip.set(ds)                          # painted later, once the table is filled
         n = len(ds)
-        self.table.setRowCount(n)
+        self.table.setRowCount(n + 1)               # + the totals row
         for r, d in enumerate(reversed(ds)):            # newest first
             known = d["on_s"] + d["off_s"] > 0
             cells = [datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a %d.%m"),
@@ -491,6 +491,34 @@ class DaysView:
                 elif text == "—" or (c == 3 and d["unknown_s"] < 60):
                     item.setForeground(QColor(MUTED))
                 self.table.setItem(r, c, item)
+        # totals: sums, the lowest SoC / cell, and outages counted once over the period -
+        # per day, one going on past midnight is in both days
+        outages, last = 0, None
+        for d in ds:                                # oldest first; holes don't split one
+            for a, b, off in d["segs"]:
+                if off and not last:
+                    outages += 1
+                last = off
+        socs = [d["soc_min"] for d in ds if d["soc_min"] is not None]
+        cmins = [d["cell_min"] for d in ds if d["cell_min"] is not None]
+        tot = ["Total", hm(sum(d["off_s"] for d in ds)), hm(sum(d["on_s"] for d in ds)),
+               hm(sum(d["unknown_s"] for d in ds)), str(outages),
+               f"{sum(d['used_wh'] for d in ds) / 1000:.2f}",
+               f"{sum(d['charged_wh'] for d in ds) / 1000:.2f}",
+               f"{min(socs)} %" if socs else "—", f"{min(cmins):.3f} V" if cmins else "—"]
+        bold = QFont()
+        bold.setBold(True)
+        for c, text in enumerate(tot):
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(Qt.AlignVCenter | (Qt.AlignLeft if c == 0 else Qt.AlignRight))
+            item.setFont(bold)
+            item.setBackground(QColor("#1f2228"))
+            if c == 1 and sum(d["off_s"] for d in ds) > 0:
+                item.setForeground(QColor(GRID_OFF))
+            if c == 0:
+                item.setToolTip(f"Over the {n} days: sums; SoC and cell - the lowest; an outage "
+                                "going on past midnight counts once here")
+            self.table.setItem(n, c, item)
         # the table never gets narrower than its columns need (a room is kept for the
         # vertical scrollbar): when the window narrows, the strip gives way first
         t, hdr = self.table, self.table.horizontalHeader()
