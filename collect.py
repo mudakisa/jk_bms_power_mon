@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS readings (
 CREATE INDEX IF NOT EXISTS idx_readings_bank_ts ON readings(bank, ts);
 """
 
+def plausible(d):
+    """A mangled frame can pass the JK's 8-bit checksum on a weak link (+168645 A was
+    stored twice from a bank at -83 dBm): keep only values a JK pack can show."""
+    cells = d["cells_v"]
+    return (abs(d["current_a"]) <= 600 and 2 <= d["pack_v"] <= 80 and 0 <= d["soc_pct"] <= 100
+            and cells and 1.5 <= min(cells) and max(cells) <= 4.5 and abs(d["power_w"]) <= 30000
+            and 0 <= d["remain_ah"] <= 1000 and 0 <= d["nominal_ah"] <= 1000)
+
+
 def init_db(db):
     con = sqlite3.connect(db, check_same_thread=False)
     con.executescript(SCHEMA)
@@ -135,7 +144,10 @@ async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
             frame = bytes(buf[:FRAME_LEN]); del buf[:FRAME_LEN]
             if frame[4] == 0x02:
                 st["last_frame"] = time.time()
-                try: maybe_store(parse_cell_info(frame))
+                try:
+                    d = parse_cell_info(frame)
+                    if plausible(d):
+                        maybe_store(d)
                 except Exception: pass
 
     known = True                        # try BlueZ's remembered device first

@@ -18,6 +18,12 @@ ETA_WINDOW_S = 300   # "current load" = time-weighted mean current over this win
 IDLE_A = 0.5         # |mean current| below this is idle, no ETA (the collector's --load-a)
 GAP_S = 60           # one sample stands for at most this long (a longer gap = no data)
 STALE_S = 120        # no ETA when the newest reading is older than this
+# A frame mangled on a weak link can still pass the JK's 8-bit checksum (bank 2 at
+# -83 dBm stored +168645 A twice): rows outside these bounds are left out on reading.
+# The collector also stops storing such frames (collect.plausible); old rows stay put.
+SANE = ("abs(current_a) <= 600 AND pack_v BETWEEN 2 AND 80 AND soc_pct BETWEEN 0 AND 100 "
+        "AND cell_min_v >= 1.5 AND cell_max_v <= 4.5 AND abs(power_w) <= 30000 "
+        "AND remain_ah BETWEEN 0 AND 1000 AND nominal_ah BETWEEN 0 AND 1000")
 BREAK_S = 90         # readings further apart = no data between (PC asleep, link down):
                      # the charts break the line there instead of bridging the hole
 
@@ -73,8 +79,8 @@ def latest_soc(db=DB):
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
     out = {}
     for b, _ in LABELS:
-        r = con.execute("SELECT soc_pct, ts FROM readings WHERE bank=? ORDER BY ts DESC LIMIT 1",
-                        (b,)).fetchone()
+        r = con.execute(f"SELECT soc_pct, ts FROM readings WHERE bank=? AND {SANE} "
+                        "ORDER BY ts DESC LIMIT 1", (b,)).fetchone()
         if r:
             out[b] = r
     con.close()
@@ -90,7 +96,7 @@ def eta(con, bank, now):
     Charge left comes from the BMS coulomb counter (remain_ah of nominal_ah)."""
     rows = con.execute(
         "SELECT ts, current_a, remain_ah, nominal_ah FROM readings "
-        "WHERE bank=? AND ts>=? AND current_a IS NOT NULL ORDER BY ts",
+        f"WHERE bank=? AND ts>=? AND current_a IS NOT NULL AND {SANE} ORDER BY ts",
         (bank, now - ETA_WINDOW_S)).fetchall()
     if not rows or now - rows[-1][0] > STALE_S:
         return None
@@ -152,7 +158,7 @@ def _days(bank, first, n):
             "soc_min": None, "cell_min": None, "segs": []} for i in range(n)]
     con = _connect()
     rows = con.execute("SELECT ts, current_a, power_w, soc_pct, cell_min_v FROM readings "
-                       "WHERE bank=? AND ts>=? ORDER BY ts", (bank, starts[0])).fetchall()
+                       f"WHERE bank=? AND ts>=? AND {SANE} ORDER BY ts", (bank, starts[0])).fetchall()
     con.close()
     day = 0
     for i, (ts, a, p, soc, cmin) in enumerate(rows):
@@ -230,7 +236,7 @@ def _signed_power(p, a):
 def _latest(con, bank, now):
     """The bank's newest reading, of any age, with its ETA; None when it has none."""
     r = con.execute(f"SELECT ts,{','.join(COLS)},cells_json FROM readings "
-                    "WHERE bank=? ORDER BY ts DESC LIMIT 1", (bank,)).fetchone()
+                    f"WHERE bank=? AND {SANE} ORDER BY ts DESC LIMIT 1", (bank,)).fetchone()
     if not r:
         return None
     L = {"ts": int(r[0] * 1000)}
@@ -263,7 +269,8 @@ def query(minutes, bank):
     now = time.time()
     cutoff = now - minutes * 60
     rows = con.execute(
-        f"SELECT ts,{','.join(COLS)},cells_json FROM readings WHERE bank=? AND ts>=? ORDER BY ts",
+        f"SELECT ts,{','.join(COLS)},cells_json FROM readings WHERE bank=? AND ts>=? AND {SANE} "
+        "ORDER BY ts",
         (bank, cutoff)).fetchall()
     # an empty point in each hole: the solid line breaks there (a downsampling bin that
     # took both edges of a hole drew a vertical spike), the dashboards bridge it dashed
