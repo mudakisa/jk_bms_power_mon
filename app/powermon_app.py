@@ -121,6 +121,13 @@ def bridge(t, y, breaks):
     return np.array(bx, dtype=float), np.array(by, dtype=float)
 
 
+def cell_names(mask):
+    """' · C3' for a cell bitmask from readings.query (bit 0 = cell 1), ' · C1 C3' for a tie."""
+    if not mask:
+        return ""
+    return " · " + " ".join(f"C{i + 1}" for i in range(mask.bit_length()) if mask >> i & 1)
+
+
 def dashed(color, width):
     return pg.mkPen(color + "4d", width=width, style=Qt.DashLine)     # 30 % opacity
 
@@ -248,8 +255,10 @@ class Chart:
         self.plot.scene().sigMouseMoved.connect(self.hover)
         self.plot.on_leave = self.unhover
 
-    def set(self, t, ys, breaks=()):
-        self.t, self.ys = t, ys
+    def set(self, t, ys, breaks=(), cells=None):
+        """cells: per series, which cells the value belongs to (bitmasks, see readings.query)
+        or None - the hover readout names them."""
+        self.t, self.ys, self.cells = t, ys, cells or [None] * len(ys)
         for curve, dash, y in zip(self.curves, self.bridges, ys):
             curve.setData(t, y)
             dash.setData(*bridge(t, y, breaks))
@@ -268,8 +277,9 @@ class Chart:
         i = int(np.clip(np.searchsorted(self.t, x), 1, len(self.t) - 1))
         i -= int(x - self.t[i - 1] < self.t[i] - x)
         rows = "".join(
-            f'<br><span style="color:{c}">●</span> {n}: ' + ("—" if np.isnan(y[i]) else self.fmt.format(y[i]))
-            for (n, c), y in zip(self.series, self.ys))
+            f'<br><span style="color:{c}">●</span> {n}: ' + ("—" if np.isnan(y[i]) else self.fmt.format(y[i])
+                                                             + cell_names(at[i] if at is not None else None))
+            for (n, c), y, at in zip(self.series, self.ys, self.cells))
         stamp = time.strftime("%d.%m %H:%M:%S" if self.t[-1] - self.t[0] > 86400 else "%H:%M:%S",
                               time.localtime(self.t[i]))
         self.tip.setHtml(f'<div style="color:{TXT}; font-size:11px">{stamp}{rows}</div>')
@@ -1011,7 +1021,8 @@ class Main(QMainWindow):
         self.ch["a"].set(t, [arr("current_a")], br)
         self.ch["soc"].set(t, [arr("soc_pct")], br)
         self.ch["t"].set(t, [arr("mos_temp_c"), arr("temp1_c"), arr("temp2_c")], br)
-        self.ch["cells"].set(t, [arr("cell_min_v"), arr("cell_avg_v"), arr("cell_max_v")], br)
+        self.ch["cells"].set(t, [arr("cell_min_v"), arr("cell_avg_v"), arr("cell_max_v")], br,
+                             [d["cell_min_at"], None, d["cell_max_at"]])
         self.ch["d"].set(t, [arr("delta_mv")], br)
         self.mini["soc"].set(t, [arr("soc_pct")], br)
         self.mini["a"].set(t, [arr("current_a")], br)

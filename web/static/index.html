@@ -150,7 +150,8 @@ function mkChart(id, datasets, ycfg){
     options:{ animation:false, responsive:true, maintainAspectRatio:false,
       interaction:{mode:"index", intersect:false},
       plugins:{ legend:{display:datasets.length>1, labels:{color:"#9aa0aa", boxWidth:10, font:{size:11}}},
-                tooltip:{callbacks:{title:(it)=>fmtTime(it[0].parsed.x)}} },
+                tooltip:{callbacks:{title:(it)=>fmtTime(it[0].parsed.x),
+                                    label:(it)=>`${it.dataset.label}: ${it.formattedValue}${cellNames(it.raw.at)}`}} },
       scales:{ x:{type:"linear", grid:{color:"#1d2026"},
                   ticks:{color:"#777", maxTicksLimit:6, callback:(v)=>fmtTime(v)}},
                y:Object.assign({grid:{color:"#1d2026"}, ticks:{color:"#777"}}, ycfg||{}) } }
@@ -165,8 +166,15 @@ const ch = {
   d:    mkChart("c_d",    [ds("Delta mV", C.d, true)], {min:0}),
 };
 
-const pts = (t,arr) => t.map((x,i)=>({x, y:arr[i]}));
-function setData(chart, idx, t, arr){ chart.data.datasets[idx].data = pts(t,arr); }
+// at: which cells the value belongs to - a bitmask from the server, bit 0 = cell 1
+const pts = (t,arr,at) => t.map((x,i)=>at ? {x, y:arr[i], at:at[i]} : {x, y:arr[i]});
+function setData(chart, idx, t, arr, at){ chart.data.datasets[idx].data = pts(t,arr,at); }
+// " · C3" for the tooltip, " · C1 C3" for a tie
+function cellNames(m){
+  const c = [];
+  for (let i = 0; m && i < 32; i++) if (Math.floor(m / 2 ** i) % 2) c.push("C" + (i + 1));
+  return c.length ? " · " + c.join(" ") : "";
+}
 
 // ETA: "13 h 52 m", and the clock time it lands on (weekday if not today)
 function fmtDur(h){
@@ -286,7 +294,8 @@ async function load(){
   setData(ch.a, 0, t, d.current_a);
   setData(ch.soc, 0, t, d.soc_pct);
   setData(ch.t, 0, t, d.mos_temp_c); setData(ch.t, 1, t, d.temp1_c); setData(ch.t, 2, t, d.temp2_c);
-  setData(ch.cells, 0, t, d.cell_min_v); setData(ch.cells, 1, t, d.cell_avg_v); setData(ch.cells, 2, t, d.cell_max_v);
+  setData(ch.cells, 0, t, d.cell_min_v, d.cell_min_at); setData(ch.cells, 1, t, d.cell_avg_v);
+  setData(ch.cells, 2, t, d.cell_max_v, d.cell_max_at);
   setData(ch.d, 0, t, d.delta_mv);
   // Pin the X axis to the data extent. Otherwise the linear scale rounds the
   // ms bounds to "nice" numbers and over-extends, leaving empty margins L/R.

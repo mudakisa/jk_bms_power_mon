@@ -286,6 +286,13 @@ def query(minutes, bank):
         out[c] = [r[i + 1] for r in rows]
     out["power_w"] = [_signed_power(p, a) for p, a in zip(out["power_w"], out["current_a"])]
     out["delta_mv"] = [(v * 1000 if v is not None else None) for v in out["cell_delta_v"]]
+    # which cell is the lowest / the highest: a bitmask, bit 0 = cell 1; a tie sets several
+    # (one json.loads for all rows: half the time of one per row, 7 d = 250k rows)
+    mins, maxs = out["cell_min_at"], out["cell_max_at"] = [], []
+    for cells in json.loads("[" + ",".join(r[-1] or "null" for r in rows) + "]"):
+        for at, v in ((mins, min(cells)), (maxs, max(cells))) if cells else ((mins, None), (maxs, None)):
+            at.append(None if v is None else 1 << cells.index(v) if cells.count(v) == 1
+                      else sum(1 << i for i, x in enumerate(cells) if x == v))
     out["latest"] = _latest(con, bank, now)
     con.close()
     return out
