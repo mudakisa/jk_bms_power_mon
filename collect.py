@@ -109,6 +109,28 @@ async def _sleep_or_stop(stop, timeout):
     except asyncio.TimeoutError:
         pass
 
+ADAPTER_CHECK = {"last": 0.0}
+
+
+async def revive_adapter():
+    """A USB dongle can crash ("HCI hardware error", hci0 DOWN): every connect then fails
+    forever and only a power-on brings it back (it did, 16.10 13:02). Called after a failed
+    connect, at most once per 30 s; touches only the local adapter, never the BMS."""
+    if time.time() - ADAPTER_CHECK["last"] < 30:
+        return
+    ADAPTER_CHECK["last"] = time.time()
+    try:
+        async def ctl(*args):
+            p = await asyncio.create_subprocess_exec("bluetoothctl", *args, stdout=asyncio.subprocess.PIPE,
+                                                     stderr=asyncio.subprocess.DEVNULL)
+            return (await asyncio.wait_for(p.communicate(), 10))[0].decode(errors="replace")
+        if "Powered: no" in await ctl("show"):
+            print("bluetooth adapter is powered off - powering it on")
+            await ctl("power", "on")
+    except Exception as e:
+        print(f"adapter check failed: {e!r}")
+
+
 async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
     """Hold a persistent connection; store frames adaptively. Reconnect on drop.
     Exits cleanly (disconnecting) when `stop` is set - never via task cancellation,
@@ -230,6 +252,7 @@ async def run_bank(con, db, name, addr, cfg, stop, start_delay=0.0):
             print(f"{name}: disconnected ({e!r}); retry in 5s")
         except Exception as e:
             print(f"{name}: disconnected ({e!r}); retry in 5s")
+        await revive_adapter()
         await _sleep_or_stop(stop, 5)
 
 async def main():
